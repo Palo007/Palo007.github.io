@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <bool name="enableNotification">true</bool>
+    <bool name="enableSiteSettingsShortcut">true</bool>
+    <color name="backgroundColor">#36205C</color>
+    <color name="colorPrimary">#4F2A93</color>
+    <color name="colorPrimaryDark">#000000</color>
+    <color name="navigationColor">#000000</color>
+    <color name="navigationColorDark">#000000</color>
+    <color name="navigationDividerColor">#000000</color>
+    <color name="navigationDividerColorDark">#000000</color>
+    <color name="shortcut_background">#F5F5F5</color>
+    <integer name="splashScreenFadeOutDuration">300</integer>
+    <string name="appName" translatable="false">Questa</string>
+    <string name="assetStatements">
+    [{
+        \"relation\": [\"delegate_permission/common.handle_all_urls\"],
+        \"target\": {
+            \"namespace\": \"web\",
+            \"site\": \"https://palo007.github.io\"
+        }
+    }]
+    
+  </string>
+    <string name="fallbackType" translatable="false">customtabs</string>
+    <string name="fullScopeUrl" translatable="false">https://palo007.github.io/Questa/</string>
+    <string name="generatorApp" translatable="false">bubblewrap-cli</string>
+    <string name="hostName" translatable="false">palo007.github.io</string>
+    <string name="launchUrl" translatable="false">https://palo007.github.io/Questa/</string>
+    <string name="launcherName" translatable="false">Questa</string>
+    <string name="orientation" translatable="false">portrait</string>
+    <string name="providerAuthority" translatable="false">io.github.palo007.twa.fileprovider</string>
+    <string name="shortcut_name_0" translatable="false">Quick log</string>
+    <string name="shortcut_name_1" translatable="false">Habits</string>
+    <string name="shortcut_name_2" translatable="false">Dailies</string>
+    <string name="shortcut_short_name_0" translatable="false">Quick log</string>
+    <string name="shortcut_short_name_1" translatable="false">Habits</string>
+    <string name="shortcut_short_name_2" translatable="false">Dailies</string>
+    <string name="webManifestUrl" translatable="false">https://palo007.github.io/Questa/manifest.json</string>
+</resources>
