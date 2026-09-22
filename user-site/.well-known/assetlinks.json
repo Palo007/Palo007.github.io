@@ -1,7 +1,7 @@
 [
   {
     "relation": [
-      "delegate_permission/MANAGE_DOCUMENT_LAUNCH"
+      "delegate_permission/common.handle_all_urls"
     ],
     "target": {
       "namespace": "android_app",
