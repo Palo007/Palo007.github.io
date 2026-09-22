@@ -19,3 +19,5 @@
 /_init-driver.log
 /_init-raw.log
 /_render-icons.js
+# Android Gradle build outputs (lives under app/build, not matched by /build above)
+/app/build/
