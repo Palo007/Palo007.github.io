@@ -32,6 +32,16 @@
 
     
 
+    <!-- Android 11+ (API 30+) package visibility: without this query the app
+         cannot see any browser's CustomTabsService, so TwaProviderPicker finds
+         no TWA-capable provider and silently falls back to Custom Tab mode
+         (the address-bar / share / three-dots toolbar). -->
+    <queries>
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
+    </queries>
+
     <application
         android:name="Application"
         android:allowBackup="true"
@@ -144,15 +154,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <intent-filter android:autoVerify="true">
+                        <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="https"
                     android:host="@string/hostName"
-                
-                    android:pathPrefix="/Questa/"
-                
                 />
             </intent-filter>
 

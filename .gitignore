@@ -21,3 +21,5 @@
 /_render-icons.js
 # Android Gradle build outputs (lives under app/build, not matched by /build above)
 /app/build/
+/app
+*.md

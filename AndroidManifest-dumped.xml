@@ -1,0 +1,2 @@
+09-22 11:49:37.897  5480 23556 W asset   : Asset path --values is neither a directory nor file (type=1).
+ERROR: dump failed because assets could not be loaded

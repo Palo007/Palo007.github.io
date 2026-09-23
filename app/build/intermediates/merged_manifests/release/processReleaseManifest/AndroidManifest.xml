@@ -32,7 +32,16 @@
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+         Android 11+ (API 30+) package visibility: without this query the app
+         cannot see any browser's CustomTabsService, so TwaProviderPicker finds
+         no TWA-capable provider and silently falls back to Custom Tab mode
+         (the address-bar / share / three-dots toolbar).
+    -->
     <queries>
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.VIEW" />
 
@@ -144,7 +153,6 @@
 
                 <data
                     android:host="@string/hostName"
-                    android:pathPrefix="/Questa/"
                     android:scheme="https" />
             </intent-filter>
         </activity>

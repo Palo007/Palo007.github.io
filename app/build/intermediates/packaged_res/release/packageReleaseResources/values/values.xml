@@ -14,13 +14,12 @@
     <string name="appName" translatable="false">Questa</string>
     <string name="assetStatements">
     [{
-        \"relation\": [\"delegate_permission/common.handle_all_urls\"],
-        \"target\": {
-            \"namespace\": \"web\",
-            \"site\": \"https://palo007.github.io\"
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {
+            "namespace": "web",
+            "site": "https://palo007.github.io"
         }
     }]
-    
   </string>
     <string name="fallbackType" translatable="false">customtabs</string>
     <string name="fullScopeUrl" translatable="false">https://palo007.github.io/Questa/</string>
