@@ -24,6 +24,8 @@ public class Application extends android.app.Application {
   @Override
   public void onCreate() {
       super.onCreate();
+      // HAND-OWNED (quick-log): re-add after `bubblewrap update`.
+      io.github.palo007.twa.quicklog.QuickLogBootstrap.onAppStart(this);
       
   }
 }

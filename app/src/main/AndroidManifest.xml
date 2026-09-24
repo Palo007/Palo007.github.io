@@ -24,7 +24,16 @@
 
     
         <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    
+    <uses-permission android:name="android.permission.INTERNET"/> <!-- HAND-OWNED (quick-log) -->
+    <!-- HAND-OWNED (quick-log, android-inbox-step1 Phase 1C): background reminders. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- HAND-OWNED (quick-log): sideloaded app (not on Play), so USE_EXACT_ALARM is allowed and
+         is granted automatically on install (no runtime prompt), unlike SCHEDULE_EXACT_ALARM on
+         API 33+. SCHEDULE_EXACT_ALARM is capped at API 32 so it still covers API 31-32, where
+         USE_EXACT_ALARM does not apply. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+
 
     
 
@@ -79,10 +88,8 @@
                 <meta-data
                     android:name="android.support.customtabs.trusted.MANAGE_SPACE_URL"
                     android:value="@string/launchUrl" />
-                <intent-filter>
-                    <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
-                    <category android:name="android.intent.category.DEFAULT" />
-                </intent-filter>
+                <!-- HAND-OWNED (quick-log): APPLICATION_PREFERENCES moved to quicklog.SettingsActivity.
+                     This screen stays reachable through android:manageSpaceActivity. -->
             </activity>
         
 
@@ -202,7 +209,58 @@
 
         
             <activity android:name="com.google.androidbrowserhelper.trusted.NotificationPermissionRequestActivity" />
-        
+
+        <!-- ===== HAND-OWNED (quick-log, android-inbox-step1 Phase 1B). Re-add after `bubblewrap update`. ===== -->
+        <!-- Headless target of the long-press habit items. Not exported: only our own shortcuts start it. -->
+        <activity android:name=".quicklog.QuickLogActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="" />
+        <!-- Dropbox connect / status. Exported for the Settings > Apps > Questa gear button. -->
+        <activity android:name=".quicklog.SettingsActivity"
+            android:exported="true"
+            android:label="Questa quick log"
+            android:theme="@android:style/Theme.Material.Light.DarkActionBar"
+            android:excludeFromRecents="true"
+            android:taskAffinity="io.github.palo007.twa.quicklog">
+            <intent-filter>
+                <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <!-- Dropbox SDK login redirect: db-<APP_KEY>. -->
+        <activity android:name="com.dropbox.core.android.AuthActivity"
+            android:exported="true"
+            android:configChanges="orientation|keyboard"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <data android:scheme="db-9bmdhb7j1b5nuke" />
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <!-- Phase 1C: fires one reminder notification. Not exported: only our own alarms start it. -->
+        <receiver android:name=".quicklog.ReminderReceiver"
+            android:exported="false" />
+        <!-- Phase 1C: re-arms all reminders after boot / clock or timezone change / app update. -->
+        <receiver android:name=".quicklog.ReminderBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+        <!-- ===== END HAND-OWNED (quick-log) ===== -->
+
 
         
     </application>

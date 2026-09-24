@@ -1,25 +1,40 @@
-/.gradle
+# This repo is PUBLIC (GitHub Pages user site). Never commit secrets.
+
+# === Secrets: signing key and its password ===
 /android.keystore
-/app-release-signed.apk
-/app-release-signed.apk.idsig
-/app-release-unsigned-aligned.apk
+/keystore.pass
+*.keystore
+*.jks
+local.properties
+
+# === Build outputs and APKs ===
+/.gradle
 /build
-/build.gradle
-/gradle
-/gradle.properties
-/gradlew
-/gradlew.bat
+/app/build/
+/builds
+*.apk
+*.idsig
+*.aab
+
+# === Local tooling, logs and scratch ===
 /manifest-checksum.txt
-/settings.gradle
 /store_icon.png
-/twa-manifest.json
 /user-site
 /_build-driver.js
 /_init-driver.js
 /_init-driver.log
 /_init-raw.log
 /_render-icons.js
-# Android Gradle build outputs (lives under app/build, not matched by /build above)
-/app/build/
-/app
+*.log
+/.omo/
+/.cline/
+/.kilo/
+/.idea/
+
+# === Notes: only README.md is tracked ===
 *.md
+!/README.md
+
+# Tracked on purpose (were ignored before 2026-09-24): the Android source in
+# /app (hand-owned native code, see README), the root Gradle files, the Gradle
+# wrapper and twa-manifest.json, so the app can be rebuilt from a clone.

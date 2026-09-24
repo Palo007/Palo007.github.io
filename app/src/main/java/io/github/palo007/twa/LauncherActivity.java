@@ -19,8 +19,11 @@ import android.content.pm.ActivityInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 
-
+import io.github.palo007.twa.quicklog.DropboxAuth;
+import io.github.palo007.twa.quicklog.ReminderScheduler;
+import io.github.palo007.twa.quicklog.ReminderSyncWorker;
 
 public class LauncherActivity
         extends com.google.androidbrowserhelper.trusted.LauncherActivity {
@@ -40,6 +43,16 @@ public class LauncherActivity
         } else {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
         }
+
+        // HAND-OWNED (quick-log): cheap refresh every time the app is opened, not only on
+        // process start (QuickLogBootstrap only runs once per process).
+        try {
+            if (DropboxAuth.isConnected(this)) {
+                ReminderSyncWorker.enqueueNow(this);
+            }
+        } catch (Throwable t) {
+            // Never let this break the TWA launch.
+        }
     }
 
     @Override
@@ -47,7 +60,18 @@ public class LauncherActivity
         // Get the original launch Url.
         Uri uri = super.getLaunchingUrl();
 
-        
+        // HAND-OWNED (quick-log): tell the web app it may go silent on missed reminders when
+        // native alarms are ready to cover them. Any failure here must fall back to the plain
+        // uri so the launch itself is never at risk.
+        try {
+            boolean ready = ReminderScheduler.nativeReady(this);
+            Log.i("QuestaReminder", "nativeReady=" + ready);
+            if (ready) {
+                uri = uri.buildUpon().appendQueryParameter("nr", "1").build();
+            }
+        } catch (Throwable t) {
+            // Fall through: uri is still the plain, unmodified one.
+        }
 
         return uri;
     }
