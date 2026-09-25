@@ -12,6 +12,8 @@ import java.util.TimeZone
  *   {"key":"<taskId>#<n>","taskId":"<id>","type":"habit|daily|todo",
  *    "title":"...","body":"...","time":"HH:MM",
  *    "date":"YYYY-MM-DD" or null, "days":[7 booleans, 0=Sunday] or null}]}
+ * A `date` string that is blank marks a broken once item and is skipped (CR-PWA-001);
+ * `date:null` is recurring (every day when `days` is null too).
  */
 data class ReminderItem(
     val key: String,
@@ -38,7 +40,9 @@ fun parseReminderList(text: String): List<ReminderItem>? {
         val time = it.optString("time", "")
         val hm = parseTime(time) ?: continue
         if (key.isEmpty() || taskId.isEmpty()) continue
-        val date = (it.opt("date") as? String)?.takeIf { d -> d.isNotBlank() }
+        val rawDate = it.opt("date") as? String
+        if (rawDate != null && rawDate.isBlank()) continue // CR-PWA-001: broken once item
+        val date = rawDate
         val days = parseDays(it.optJSONArray("days"))
         out.add(
             ReminderItem(

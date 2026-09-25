@@ -35,6 +35,28 @@ class ReminderListTest {
         assertNull(it.days)
     }
 
+    // CR-PWA-001 mirror: a blank `date` string marks a broken once item and is skipped.
+    @Test fun blankDateStringIsSkipped() {
+        val l = parseReminderList(
+            """{"v":1,"items":[
+                {"key":"t#0","taskId":"t","type":"todo","time":"09:00","date":"","days":null},
+                {"key":"t#1","taskId":"t","type":"todo","time":"09:00","date":"2026-10-01","days":null}
+            ]}"""
+        )!!
+        assertEquals(listOf("t#1"), l.map { it.key })
+        assertEquals("2026-10-01", l[0].date)
+    }
+
+    // Guard (option A): date:null + days:null is an every-day reminder and must stay.
+    @Test fun nullDateNullDaysStaysEveryDay() {
+        val l = parseReminderList(
+            """{"v":1,"items":[{"key":"t#0","taskId":"t","type":"todo","title":"T","time":"09:00","date":null,"days":null}]}"""
+        )!!
+        assertEquals(1, l.size)
+        assertNull(l[0].date)
+        assertNull(l[0].days)
+    }
+
     @Test fun badFilesReturnNull() {
         assertNull(parseReminderList("not json"))
         assertNull(parseReminderList("""{"v":2,"items":[]}"""))

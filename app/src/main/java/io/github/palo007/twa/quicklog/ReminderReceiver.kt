@@ -14,8 +14,12 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import java.util.TimeZone
 
-/** Time the slot date is taken from (JVM-testable seam). */
-internal fun slotBaseMs(intendedFireAt: Long, nowMs: Long): Long = nowMs
+/**
+ * Time the slot date is taken from (TWA-A4): the alarm's intended fire time, so a late inexact
+ * fire after midnight keeps the intended date. Alarms armed by an older APK carry no extra (0) -> now.
+ */
+internal fun slotBaseMs(intendedFireAt: Long, nowMs: Long): Long =
+    if (intendedFireAt > 0L) intendedFireAt else nowMs
 
 /**
  * Fires one reminder alarm (plan todo 16). Not exported: only our own PendingIntents from
@@ -40,8 +44,8 @@ class ReminderReceiver : BroadcastReceiver() {
             // Guard against a double fire of the same slot (e.g. duplicate broadcast delivery):
             // skip only if we already fired within the last 60s for this key.
             if (now - last > 60_000L) {
-                // The intended slot for this alarm: item's time on TODAY's date, even if the
-                // alarm actually fired late (e.g. inexact window delay).
+                // The intended slot for this alarm: item's time on the date of the intended fire
+                // time, even if the alarm actually fired late (e.g. inexact window past midnight).
                 val today = ReminderDedupe.localDateString(
                     slotBaseMs(intent.getLongExtra(ReminderScheduler.EXTRA_FIRE_AT, 0L), now),
                     TimeZone.getDefault()

@@ -33,9 +33,16 @@ object ReminderScheduler {
         data class Apply(val items: List<ReminderItem>, val cancelKeys: Set<String>) : RearmPlan()
     }
 
-    /** Pure decision for `rearm` (JVM-testable). */
+    /**
+     * Pure decision for `rearm` (JVM-testable, TWA-C1). Nothing stored -> cancel all; stored but
+     * unparseable -> Keep (never wipe armed alarms on a bad list); valid list (even empty) -> apply.
+     * Known limit: after a reboot the OS has dropped all alarms, so `Keep` cannot re-create them and
+     * the armed-key count stays stale until the next good sync. The download path stores only
+     * parseable lists, so this needs a stricter parser in a newer APK or corrupt prefs.
+     */
     internal fun rearmPlan(text: String?, armedBefore: Set<String>): RearmPlan {
-        val items = text?.let { parseReminderList(it) } ?: emptyList()
+        if (text == null) return RearmPlan.Apply(emptyList(), armedBefore)
+        val items = parseReminderList(text) ?: return RearmPlan.Keep
         return RearmPlan.Apply(items, armedBefore - items.map { it.key }.toSet())
     }
 
@@ -51,6 +58,8 @@ object ReminderScheduler {
             return
         }
         val items = plan.items
+        val collisions = requestCodeCollisions(items.map { it.key })
+        if (collisions.isNotEmpty()) Log.w(TAG, "request code collision keys=$collisions")
         val now = System.currentTimeMillis()
         val tz = TimeZone.getDefault()
 
@@ -75,7 +84,7 @@ object ReminderScheduler {
     }
 
     private fun scheduleAlarm(ctx: Context, am: AlarmManager, item: ReminderItem, fireAt: Long) {
-        val pi = pendingIntent(ctx, item.key, item)
+        val pi = pendingIntent(ctx, item.key, fireAt)
         val exact = Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()
         try {
             when {
@@ -91,9 +100,13 @@ object ReminderScheduler {
             }
             Log.i(TAG, "armed key=${item.key} -> ${formatLocal(fireAt)} ${if (exact) "exact" else "inexact"}")
         } catch (t: SecurityException) {
-            // Exact alarm permission revoked mid-flight: fall back to inexact.
+            // Exact alarm permission revoked mid-flight: fall back to inexact, still Doze-safe (TWA-A3).
             Log.w(TAG, "exact alarm denied for ${item.key}, using inexact", t)
-            am.set(AlarmManager.RTC_WAKEUP, fireAt, pi)
+            if (Build.VERSION.SDK_INT >= 23) {
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, fireAt, pi)
+            } else {
+                am.set(AlarmManager.RTC_WAKEUP, fireAt, pi)
+            }
             Log.i(TAG, "armed key=${item.key} -> ${formatLocal(fireAt)} inexact")
         }
     }
@@ -102,6 +115,7 @@ object ReminderScheduler {
         SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(ms))
 
     /** Called by the receiver right after it fires: re-arm just that one item's next slot. */
+    @Synchronized // same monitor as rearm: no lost update of the armed-keys set (TWA-A5)
     fun rearmOne(ctx: Context, key: String) {
         // Cheapest correct option: re-derive from the same stored JSON, same as a full rearm,
         // but only touch this key's alarm to avoid perturbing others mid-batch.
@@ -156,9 +170,11 @@ object ReminderScheduler {
     private fun alarmManager(ctx: Context): AlarmManager =
         ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
-    private fun pendingIntent(ctx: Context, key: String, item: ReminderItem? = null): PendingIntent {
+    /** Extras do not change PendingIntent identity, so `cancel` (fireAt = 0) still matches. */
+    private fun pendingIntent(ctx: Context, key: String, fireAt: Long = 0L): PendingIntent {
         val intent = Intent(ACTION_FIRE).setClass(ctx, ReminderReceiver::class.java)
             .putExtra(EXTRA_KEY, key)
+        if (fireAt > 0L) intent.putExtra(EXTRA_FIRE_AT, fireAt)
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or
             (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
         return PendingIntent.getBroadcast(ctx, requestCode(key), intent, flags)
@@ -168,7 +184,8 @@ object ReminderScheduler {
     internal fun requestCode(key: String): Int = key.hashCode()
 
     /** Keys whose request code is shared with another key (TWA-A7 detector; no id-map change). */
-    internal fun requestCodeCollisions(keys: Collection<String>): Set<String> = emptySet()
+    internal fun requestCodeCollisions(keys: Collection<String>): Set<String> =
+        keys.toSet().groupBy { requestCode(it) }.values.filter { it.size > 1 }.flatten().toSet()
 
     private fun readArmedKeys(p: android.content.SharedPreferences): Set<String> {
         val s = p.getString(KEY_ARMED_KEYS, null) ?: return emptySet()
