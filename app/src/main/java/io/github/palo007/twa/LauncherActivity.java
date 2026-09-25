@@ -22,6 +22,8 @@ import android.os.Bundle;
 import android.util.Log;
 
 import io.github.palo007.twa.quicklog.DropboxAuth;
+import io.github.palo007.twa.quicklog.LaunchSync;
+import io.github.palo007.twa.quicklog.ProviderNotice;
 import io.github.palo007.twa.quicklog.ReminderScheduler;
 import io.github.palo007.twa.quicklog.ReminderSyncWorker;
 
@@ -49,7 +51,19 @@ public class LauncherActivity
         try {
             if (DropboxAuth.isConnected(this)) {
                 ReminderSyncWorker.enqueueNow(this);
+                // HAND-OWNED (quick-log, TWA-26): delayed (~3 min) unique follow-up sync so a reminder
+                // edited early in the TWA session is armed without waiting for the periodic run.
+                // Not expedited (TWA-27).
+                LaunchSync.enqueueFollowUp(this);
             }
+        } catch (Throwable t) {
+            // Never let this break the TWA launch.
+        }
+
+        // HAND-OWNED (quick-log, TWA-03): one-time Toast when no TWA provider (Chrome) is available and
+        // the launch falls back to a Custom Tab in another browser with separate storage.
+        try {
+            ProviderNotice.maybeShow(this);
         } catch (Throwable t) {
             // Never let this break the TWA launch.
         }
