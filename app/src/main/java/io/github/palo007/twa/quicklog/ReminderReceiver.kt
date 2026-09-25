@@ -14,6 +14,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import java.util.TimeZone
 
+/** Time the slot date is taken from (JVM-testable seam). */
+internal fun slotBaseMs(intendedFireAt: Long, nowMs: Long): Long = nowMs
+
 /**
  * Fires one reminder alarm (plan todo 16). Not exported: only our own PendingIntents from
  * ReminderScheduler start it. Re-reads reminders.json by key at fire time so the title/body
@@ -39,7 +42,10 @@ class ReminderReceiver : BroadcastReceiver() {
             if (now - last > 60_000L) {
                 // The intended slot for this alarm: item's time on TODAY's date, even if the
                 // alarm actually fired late (e.g. inexact window delay).
-                val today = ReminderDedupe.localDateString(now, TimeZone.getDefault())
+                val today = ReminderDedupe.localDateString(
+                    slotBaseMs(intent.getLongExtra(ReminderScheduler.EXTRA_FIRE_AT, 0L), now),
+                    TimeZone.getDefault()
+                )
                 val slot = ReminderDedupe.buildSlotKey(
                     item.title, today, ReminderDedupe.timeString(item.hour, item.minute)
                 )

@@ -21,26 +21,42 @@ import java.util.TimeZone
 object ReminderScheduler {
     const val ACTION_FIRE = "io.github.palo007.twa.quicklog.ACTION_REMINDER_FIRE"
     const val EXTRA_KEY = "key"
+    const val EXTRA_FIRE_AT = "fireAt" // intended fire time (ms); absent on alarms from older APKs
 
     private const val KEY_ARMED_KEYS = "reminder_armed_keys" // JSON array of item keys
     private const val KEY_LAST_FIRED_SLOT_PREFIX = "reminder_last_fired_" // + key -> slot ms
     private const val TAG = "QuestaReminder"
+
+    /** What `rearm` should do with the stored list: keep the armed alarms, or apply a list. */
+    internal sealed class RearmPlan {
+        object Keep : RearmPlan()
+        data class Apply(val items: List<ReminderItem>, val cancelKeys: Set<String>) : RearmPlan()
+    }
+
+    /** Pure decision for `rearm` (JVM-testable). */
+    internal fun rearmPlan(text: String?, armedBefore: Set<String>): RearmPlan {
+        val items = text?.let { parseReminderList(it) } ?: emptyList()
+        return RearmPlan.Apply(items, armedBefore - items.map { it.key }.toSet())
+    }
 
     @Synchronized
     fun rearm(ctx: Context) {
         val app = ctx.applicationContext
         val p = DropboxAuth.prefs(app)
         val text = p.getString(ReminderSyncWorker.KEY_REMINDERS_JSON, null)
-        val items = text?.let { parseReminderList(it) } ?: emptyList()
+        val armedBefore = readArmedKeys(p)
+        val plan = rearmPlan(text, armedBefore)
+        if (plan !is RearmPlan.Apply) {
+            Log.w(TAG, "rearm kept: stored list unreadable")
+            return
+        }
+        val items = plan.items
         val now = System.currentTimeMillis()
         val tz = TimeZone.getDefault()
 
-        val armedBefore = readArmedKeys(p)
-        val desiredKeys = items.map { it.key }.toSet()
-
         // Cancel alarms for keys no longer present.
         val am = alarmManager(app)
-        for (staleKey in armedBefore - desiredKeys) {
+        for (staleKey in plan.cancelKeys) {
             am.cancel(pendingIntent(app, staleKey))
         }
 
@@ -149,7 +165,10 @@ object ReminderScheduler {
     }
 
     /** Stable, non-zero-colliding-enough request code from the key (32-bit hash is fine here). */
-    private fun requestCode(key: String): Int = key.hashCode()
+    internal fun requestCode(key: String): Int = key.hashCode()
+
+    /** Keys whose request code is shared with another key (TWA-A7 detector; no id-map change). */
+    internal fun requestCodeCollisions(keys: Collection<String>): Set<String> = emptySet()
 
     private fun readArmedKeys(p: android.content.SharedPreferences): Set<String> {
         val s = p.getString(KEY_ARMED_KEYS, null) ?: return emptySet()
