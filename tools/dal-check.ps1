@@ -185,7 +185,10 @@ if ($Apk) {
     if (-not $signer) { $cmd = Get-Command apksigner -ErrorAction SilentlyContinue; if ($cmd) { $signer = $cmd.Source } }
     if (-not $signer) { Fail 'apksigner not found (set ANDROID_HOME)' }
     else {
-      $out = & $signer verify --print-certs $Apk 2>&1
+      $oldEap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+      try { $out = & $signer verify --print-certs $Apk 2>&1; $sigExit = $LASTEXITCODE }
+      finally { $ErrorActionPreference = $oldEap }
+      if ($sigExit -ne 0) { Fail "APK: apksigner verify exited $sigExit (unsigned or invalid signature?)" }
       $digs = @($out | ForEach-Object { $l = [string]$_; if ($l -match 'SHA-256 digest:\s*([0-9a-fA-F]{64})') { $matches[1] } })
       if ($digs.Count -eq 0) { Fail "APK: no SHA-256 cert digest found (apksigner exit $LASTEXITCODE)" }
       foreach ($dg in $digs) {

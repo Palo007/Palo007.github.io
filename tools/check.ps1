@@ -39,12 +39,19 @@ else { Add-Result 'env' 'FAIL' "ANDROID_HOME=$($env:ANDROID_HOME) ($src) does no
 $gradlew = Join-Path $Root 'gradlew.bat'
 foreach ($task in @('assembleDebug', 'testDebugUnitTest')) {
   if ($NoBuild) { Add-Result $task 'SKIP' '(-NoBuild)'; continue }
+  $log = Join-Path ([IO.Path]::GetTempPath()) "questa-check-$task.log"
+  $code = -1
   Push-Location $Root
+  $oldEap = $ErrorActionPreference
   try {
-    $log = Join-Path ([IO.Path]::GetTempPath()) "questa-check-$task.log"
-    & $gradlew $task --console=plain *> $log
+    # Redirect inside cmd.exe so gradle's stderr never becomes a PowerShell error record
+    # (Windows PowerShell 5.1 + 'Stop' would otherwise abort the whole script).
+    $ErrorActionPreference = 'Continue'
+    & cmd.exe /c "`"$gradlew`" $task --console=plain > `"$log`" 2>&1"
     $code = $LASTEXITCODE
-  } finally { Pop-Location }
+  } catch {
+    Add-Result $task 'FAIL' "exception: $($_.Exception.Message) (log: $log)"; continue
+  } finally { $ErrorActionPreference = $oldEap; Pop-Location }
   $note = "(log: $log)"
   if ($task -eq 'testDebugUnitTest') {
     $tests = 0; $failed = 0
@@ -60,16 +67,26 @@ foreach ($task in @('assembleDebug', 'testDebugUnitTest')) {
   if ($code -eq 0) { Add-Result $task 'PASS' $note } else { Add-Result $task 'FAIL' "exit $code $note" }
 }
 
+function Invoke-Child([string]$step, [string]$file, [string[]]$childArgs) {
+  $oldEap = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    & $Shell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot $file) @childArgs
+    $code = $LASTEXITCODE
+    if ($code -eq 0) { Add-Result $step 'PASS' '' } else { Add-Result $step 'FAIL' "exit $code" }
+  } catch {
+    Add-Result $step 'FAIL' "exception: $($_.Exception.Message)"
+  } finally { $ErrorActionPreference = $oldEap }
+}
+
 # 4. HAND-OWNED guard.
-& $Shell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'hand-owned-guard.ps1') -Root $Root
-if ($LASTEXITCODE -eq 0) { Add-Result 'hand-owned-guard' 'PASS' '' } else { Add-Result 'hand-owned-guard' 'FAIL' '' }
+Invoke-Child 'hand-owned-guard' 'hand-owned-guard.ps1' @('-Root', $Root)
 
 # 5. DAL check.
 $dalArgs = @('-Root', $Root)
 if ($Offline) { $dalArgs += '-Offline' }
 if ($Apk) { $dalArgs += @('-Apk', $Apk) }
-& $Shell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'dal-check.ps1') @dalArgs
-if ($LASTEXITCODE -eq 0) { Add-Result 'dal-check' 'PASS' '' } else { Add-Result 'dal-check' 'FAIL' '' }
+Invoke-Child 'dal-check' 'dal-check.ps1' $dalArgs
 
 Write-Host ''
 Write-Host '== check.ps1 summary'
