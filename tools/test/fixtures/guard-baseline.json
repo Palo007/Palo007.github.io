@@ -1,0 +1,11 @@
+{
+  "marker": "HAND-OWNED (quick-log",
+  "definition": "fixture baseline for tools/test/run-tests.ps1",
+  "commit": "fixture",
+  "totalLines": 3,
+  "totalFiles": 2,
+  "files": {
+    "app/build.gradle": 2,
+    "app/src/QuickLog.kt": 1
+  }
+}

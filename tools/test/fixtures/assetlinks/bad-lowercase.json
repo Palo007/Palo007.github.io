@@ -1,0 +1,11 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "io.github.palo007.twa",
+      "sha256_cert_fingerprints": ["7e:9e:46:df:ce:a2:c5:8c:be:15:3d:64:49:df:32:28:9d:43:1a:46:70:ff:05:05:b6:2d:2c:ce:4a:26:6b:68"],
+      "check": "fixture"
+    }
+  }
+]
