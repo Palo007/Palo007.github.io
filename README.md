@@ -15,7 +15,18 @@ This repo wraps the Questa PWA (source: sibling repo `Palo007/Questa`, local `Do
                                         /inbox-meta/reminders.json
 ```
 
-Why native code exists at all: a **closed web page cannot fire notifications or log a habit tap headlessly** — a PWA's JS timers and Notification API die with the tab/service-worker, so it cannot reliably wake up in the background to ring an alarm or record a long-press. Conversely, **native Android code cannot read the browser's storage** (`localStorage`/IndexedDB the PWA keeps its state in) — there is no API for one app to reach into another's browser profile. Dropbox's app folder is the one channel both sides can reach, so the two communicate only through small JSON files there (contracts in §3). This repo's git remote is `Palo007/Palo007.github.io`, a **public** GitHub Pages user site, which is also where the domain-root trust file below is served from.
+Why native code exists at all: a **closed web page cannot fire notifications or log a habit tap headlessly** — a PWA's JS timers and Notification API die with the tab/service-worker, so it cannot reliably wake up in the background to ring an alarm or record a long-press. Conversely, **native Android code cannot read the browser's storage** (`localStorage`/IndexedDB the PWA keeps its state in) — there is no API for one app to reach into another's browser profile. Dropbox's app folder is the one channel both sides can reach, so the two communicate only through small JSON files there (contracts in §4). This repo's git remote is `Palo007/Palo007.github.io`, a **public** GitHub Pages user site, which is also where the domain-root trust file below is served from.
+
+**Role (decision 2026-09-26):** this TWA stays long-term as a **sideloaded backup Android app**. It does not go to Google Play. The main Android app is the native Kotlin app (see §10).
+
+### Where your data lives (read this)
+
+- **Chrome owns Questa's data.** The PWA keeps its state in Chrome's site storage (`localStorage`/IndexedDB) for `palo007.github.io`. The APK holds no copy.
+- **Clearing Chrome data wipes Questa.** "Clear data" for Chrome, a Chrome uninstall or reset, or deleting the site data of `palo007.github.io` erases everything that is not yet in Dropbox. Android's "Clear storage" for Questa opens Chrome's site settings for the same data.
+- **`allowBackup` does not cover it.** `android:allowBackup="true"` backs up only the TWA's own native files. It never includes Chrome's storage.
+- **The only backups are Dropbox sync and the JSON export.** Sync often, and use **Export** in the PWA often. Keep the export file outside Chrome (Downloads and a copy off the phone).
+- **Open Questa once while online after install.** The first launch needs the network: the PWA service worker is not cached yet, and Chrome fetches the trust file (§3). After that, the service worker serves the app offline.
+- **No background execution on the web side.** A closed page cannot run code. Reminders and quick-log work in the background only because of the native code above.
 
 ## 2. Features
 
@@ -69,9 +80,22 @@ No case folding, no colon stripping. Android hands Chrome `Signature.toCharsStri
 
 Online cross-check: Digital Asset Links verifier — `https://developers.google.com/digital-asset-links/tools/generator`.
 
+**Do not touch (while any phone has the TWA installed):**
+- Do not delete, move or edit `.well-known/assetlinks.json` or `.nojekyll` at the root of this repo. If you do, every installed TWA shows the URL bar again.
+- If a new app needs App Links for `palo007.github.io`, **add** a second statement to the array. Never replace the existing one.
+- A read-only check script, `tools/check.ps1`, is planned (not in the repo yet). It will lint the file format, compare the published file with the local one, query the Digital Asset Links API and check `.nojekyll`. Until it exists, use the commands in §8 after each change or signed build.
+
 ## 4. Contracts between the PWA and the Android app
 
 All of these live in the **same Dropbox app folder** both sides authenticate into (Dropbox Android SDK PKCE, same app key as the PWA — a public PKCE client id, already public in `sync.js`). Verified against the current code on both sides.
+
+**One Dropbox app key for web, TWA and Kotlin.** The PWA, this TWA's native code and the Kotlin app all use the same Dropbox app (one public PKCE key). The key is public by design, so a leak is not the risk. The risk is one switch for all three:
+- Revoking "Questa" under Dropbox > Settings > Connected apps logs out **all three** clients at once.
+- Deleting the Dropbox app, or changing its permission scopes, breaks all three.
+- "Disconnect" in the TWA settings screen revokes only the TWA's own token. The other clients keep working.
+- Uninstalling the TWA does **not** revoke its token on the Dropbox server. Revoke it in Dropbox if you must.
+- All redirect URIs (web, `db-<key>`, Kotlin `questa://oauth`) are on the same app in the Dropbox console.
+- Recovery after a revoke: connect Dropbox again in each client (web sync panel, TWA settings screen, Kotlin settings).
 
 ### 4.1 Headless quick-log — `/inbox/<uuid>.json`
 
@@ -154,13 +178,35 @@ A PWA cannot fire a notification while its page/tab is fully closed, so a remind
 
 **Prereqs:** JDK 17 (Eclipse Adoptium, e.g. `C:\Program Files\Eclipse Adoptium\jdk-17.0.17.10-hotspot`), Android SDK cmdline-tools at `%USERPROFILE%\.bubblewrap\android_sdk` (the *legacy bundled* sdkmanager is *incompatible with JDK 17* — install a fresh `commandlinetools` zip and accept licenses with the new `sdkmanager`), then `bubblewrap updateConfig --jdkPath … --androidSdkPath …`.
 
+**Toolchain (known good, 2026-09-25):**
+
+| Tool | Version |
+|---|---|
+| JDK | 17.0.17 (Eclipse Adoptium) |
+| Node | v24.13.0 |
+| `@bubblewrap/cli` | 1.25.0 |
+| Gradle (wrapper) | 8.11.1 |
+| Android Gradle Plugin | 8.9.1 |
+| Kotlin Gradle plugin | 2.1.21 |
+| `compileSdkVersion` / `targetSdkVersion` | 36 |
+| SDK platform / build-tools | android-36 / 35.0.0 and 36.1.0 |
+| `minSdkVersion` | 21 (kept on purpose, see §9) |
+
+Do not bump Gradle to 9.x yet. The Bubblewrap template in `build.gradle` still uses `jcenter()`, and Gradle 9 removes it. Remove `jcenter()` first.
+
+**Build from a fresh clone:** Gradle does not read Bubblewrap's `~/.bubblewrap/config.json`, and `local.properties` is git-ignored. Tell Gradle where the SDK is, with one of these:
+- Set the variable for the shell: `set ANDROID_HOME=%USERPROFILE%\.bubblewrap\android_sdk` (PowerShell: `$env:ANDROID_HOME="$env:USERPROFILE\.bubblewrap\android_sdk"`).
+- Or make an untracked `local.properties` in the repo root with one line: `sdk.dir=C\:\\Users\\<you>\\.bubblewrap\\android_sdk`.
+
+Without it, Gradle stops with "SDK location not found".
+
 **Debug build + unit tests:**
 ```bat
 gradlew.bat testDebugUnitTest assembleDebug
 ```
 
 **Release build + sign**, two supported paths:
-- `build-signed-apk.bat` — cleans, runs unit tests, `assembleRelease`, zipaligns, signs, verifies, copies to `builds\Questa-v<versionName>-<versionCode>-<timestamp>.apk`. Password: if a `keystore.pass` file exists next to the script (first line = password, **git-ignored, never commit**), it's used automatically; otherwise `apksigner` prompts interactively.
+- `build-signed-apk.bat` — cleans, runs unit tests, `assembleRelease`, zipaligns, signs, verifies, copies to `builds\Questa-v<versionName>-<versionCode>-<timestamp>.apk`. Password: if a `keystore.pass` file exists next to the script (first line = password, **git-ignored, never commit**), it's used automatically; otherwise `apksigner` prompts interactively. **Delete `keystore.pass` after the build.** Do not leave a plain-text password in the repo folder; prefer `sign-release.ps1` below.
 - `sign-release.ps1` — same signing steps, but the password lives **encrypted with Windows DPAPI**, outside the repo, at `%USERPROFILE%\.questa-secrets\android-keystore-password.dpapi` (never in git). Save it once with `-SavePassword` (prompts interactively, never echoes it back); then `-Build` runs Gradle + align + sign + verify, or run with no flags to just re-sign the last build. DPAPI is tied to this Windows account/profile, so keep a second copy of the password in a password manager.
 
 Output APKs land in `builds\`. Install with:
@@ -168,7 +214,15 @@ Output APKs land in `builds\`. Install with:
 adb install -r builds\Questa-v<...>.apk
 ```
 
-**Signature mismatch note:** a **debug**-signed APK cannot be installed over a **release**-signed install of the same package (or vice versa) — Android refuses with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. Uninstall first if you need to switch build types on the same device.
+**Signature mismatch note:** a **debug**-signed APK cannot be installed over a **release**-signed install of the same package (or vice versa) — Android refuses with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. Uninstall first if you need to switch build types on the same device. Uninstalling the TWA does not remove the data in Chrome, but sync and export first anyway (§1).
+
+### Install and developer verification
+
+Google's Android developer verification starts on 30 Sep 2026 in four countries and goes global in 2027 (certified devices, Android 7+).
+- **`adb install` is exempt.** Install this APK with `adb install -r` (above). This is the supported path.
+- An unverified APK installed another way (file manager, browser download) needs a one-time "advanced flow" on the phone (developer mode, restart, 24 h wait, biometric). After that, installs work.
+- **Decision (2026-09-26):** no developer registration now. Install with adb. **Review in Q1 2027**, when the global rules are out. If the APK must go to phones without adb (for example family phones), register a free limited-distribution account then.
+- Registration binds the package name and the signing key. It needs the keystore, so do the key backup below first.
 
 ### Windows/Bubblewrap quirks that cost hours
 
@@ -176,6 +230,36 @@ adb install -r builds\Questa-v<...>.apk
 2. Legacy `sdkmanager` fails on JDK 17 → install fresh cmdline-tools (see Prereqs).
 3. Bubblewrap's final signing step writes an **unquoted `C:\Program Files\…` path** and dies → sign manually with `apksigner` (as the scripts above do).
 4. Keystore generation (only if starting fresh): `keytool -genkeypair -keystore android.keystore -alias android -keyalg RSA -keysize 2048 -validity 10000`. `android.keystore` is **git-ignored, never commit** — it is the app's identity; losing it means losing update capability forever.
+
+### Keystore backup (user only)
+
+`android.keystore` is the only key that can sign updates for `io.github.palo007.twa`. There is no confirmed backup yet (§12). Only the owner does these steps. Agents never read the key or its password, and this README never holds them.
+
+1. Close Android Studio and stop Gradle (`gradlew.bat --stop`).
+2. Put `android.keystore` and its password into one **encrypted container** (for example 7-Zip AES-256 or VeraCrypt). Take the password from your password manager, not from `keystore.pass`. Use a separate, strong passphrase for the container.
+3. Keep **2 copies in 2 places**: one offline (USB drive) and one off-site (a cloud drive or a second location).
+4. In the same container, add a note with: alias `android`, package `io.github.palo007.twa`, and the SHA-256 fingerprint from the published `assetlinks.json` (§3).
+5. Test the restore once: open the container on another path, run `keytool -list -keystore <restored path>`, and compare the fingerprint with `assetlinks.json`.
+6. Tick the keystore item in §12.
+
+Do the same for the Kotlin app's upload key. It is a separate key.
+
+### Target-SDK bump checklist (yearly)
+
+Trigger: a new Android major release, or an AGP/Gradle bump. There is no Play deadline (no Play). The bump is for behaviour-change coverage. Bump `targetSdkVersion` only together with an AGP bump that supports it.
+
+1. Read "Behavior changes: apps targeting API N" for the new N. List every item that hits this app.
+2. Toolchain: the AGP version supports the new compileSdk; JDK 17 is still accepted; Gradle 9 needs `jcenter()` removed first.
+3. `androidbrowserhelper`: is there a version newer than 2.6.2, and does it still allow minSdk 21?
+4. Exact alarms: `USE_EXACT_ALARM` is still granted at install for sideloaded apps; the `canScheduleExactAlarms()` path in `ReminderScheduler.kt` still works.
+5. Notifications: the `POST_NOTIFICATIONS` request in `SettingsActivity.kt` and channel creation in `ReminderReceiver.kt`.
+6. `PendingIntent` mutability rules (`ReminderReceiver.kt`, `ReminderScheduler.kt`).
+7. Exported components, and the boot / time-change receivers in `AndroidManifest.xml`.
+8. Background work: WorkManager periodic limits and any new foreground-service rules (no foreground service is used; keep it that way).
+9. Backup rules: `allowBackup` and the data-extraction rules still apply as expected.
+10. UI of the two native screens (`QuickLogActivity`, `SettingsActivity`): edge-to-edge and predictive back.
+11. 16 KB page size: the APK has no native `.so` files.
+12. Gates: `testDebugUnitTest`, `assembleRelease`, the `HAND-OWNED` grep (§9) and the DAL check (§3), then the device checklist on the phone (§12).
 
 ## 7. Permissions and phone setup
 
@@ -235,8 +319,8 @@ grep -rn "HAND-OWNED (quick-log)" build.gradle app/build.gradle app/src app/prog
 | File | What was added |
 |---|---|
 | `build.gradle` | Kotlin Gradle plugin `2.1.21` classpath, `mavenCentral()` |
-| `app/build.gradle` | Kotlin plugin; top-level `kotlin { jvmTarget 1.8 }`; deps (Dropbox SDK 7.0.0, WorkManager 2.10.5, core 1.16.0, junit, org.json for tests); `proguardFiles 'proguard-rules.pro'`; `shortcuts:` reduced to Quick log |
-| `twa-manifest.json` | `shortcuts` reduced to Quick log (so `bubblewrap update` does not bring Habits/Dailies back) |
+| `app/build.gradle` | Kotlin plugin; top-level `kotlin { jvmTarget 1.8 }`; deps (Dropbox SDK 7.0.0, WorkManager 2.10.5, core 1.16.0, junit, org.json for tests); `proguardFiles 'proguard-rules.pro'`; `shortcuts: []` — no static shortcuts (habit items are the dynamic `ql-*` shortcuts built from `/inbox-meta/habits.json`) |
+| `twa-manifest.json` | `"shortcuts": []` — no static shortcuts, so `bubblewrap update` does not bring Habits/Dailies/Quick log back; `res/xml/shortcuts.xml` is an empty `<shortcuts/>` |
 | `app/src/main/AndroidManifest.xml` | `INTERNET` permission; `APPLICATION_PREFERENCES` filter moved to `quicklog.SettingsActivity`; `HAND-OWNED ... END HAND-OWNED` block with `QuickLogActivity`, `SettingsActivity`, Dropbox `AuthActivity`; `RECEIVE_BOOT_COMPLETED` + `SCHEDULE_EXACT_ALARM` (capped API 32) + `USE_EXACT_ALARM`; `ReminderReceiver` (not exported), `ReminderBootReceiver` (exported, boot/time/timezone/replace only) |
 | `app/src/main/java/.../Application.java` | one line: `QuickLogBootstrap.onAppStart(this)` |
 | `app/proguard-rules.pro` | `-dontwarn` for optional Dropbox SDK classes; a comment recording that release builds keep `Log.i` (no `-assumenosideeffects` strip) |
@@ -247,9 +331,36 @@ grep -rn "HAND-OWNED (quick-log)" build.gradle app/build.gradle app/src app/prog
 
 Versions are pinned to keep **minSdk 21**: `dropbox-android-sdk` 8.x needs 26, `work-runtime` 2.11+ needs 23/24, `androidx.core` 1.17+ needs 23. Raise them only together with minSdk.
 
-Note: `.gitignore` ignores `/app`, `build.gradle` and `twa-manifest.json`. New files are not in git unless added with `git add -f`.
+Note: `/app`, `build.gradle`, the Gradle wrapper and `twa-manifest.json` are **tracked** in git (since 2026-09-24), so the app can be rebuilt from a clone. `.gitignore` ignores only secrets (`android.keystore`, `keystore.pass`, `*.jks`, `local.properties`), build outputs and APKs, local tooling and logs, and every `*.md` file except `README.md`.
 
-## 10. History
+## 10. Using the TWA with the native Kotlin app
+
+The Kotlin app has a different package, so both apps install side by side. Both show a launcher icon named "Questa". Both use the same Dropbox app folder (§4).
+
+**Who owns reminders:** when both apps are installed, **the Kotlin app owns reminders**. The TWA reads the same `/inbox-meta/reminders.json` and fires its own alarms, and there is no dedupe between the two apps, so you get 2 notifications per slot.
+- **Planned:** a "Native reminders on/off" switch in the TWA settings screen. Off = the TWA cancels its alarms and stops re-arming them. It is being built in a separate change and is **not in this build yet**.
+- Until the switch ships: uninstall the TWA, or accept the duplicate notifications.
+
+**Quick-log:** a long-press shortcut on either icon writes `/inbox/<uuid>.json`. Only one client can claim a file (§4.1), so a tap counts once. Use one icon to avoid confusion.
+
+**Move data from the TWA to the Kotlin app:**
+1. In the TWA, open Questa online and let it sync to Dropbox.
+2. In the TWA, run **Export** and save the JSON outside Chrome (Downloads and a copy off the phone). This is your safety copy.
+3. On a desktop, check the Dropbox app folder: `/inbox/` is empty or almost empty (all taps claimed).
+4. Install the Kotlin app. Grant notifications and exact alarms. On MIUI, set Autostart and battery "No restrictions" (§7).
+5. In the Kotlin app, connect Dropbox (same account) and sync. If sync is not possible, import the JSON from step 2 instead. Do not do both without checking the result.
+6. Check in the Kotlin app: habit and task counts, today's log and the reminder list match the export.
+7. Next day: confirm one notification per reminder slot.
+
+**Uninstall vs disable:**
+- **Uninstall** removes the TWA's alarms, workers, shortcuts and its App Link claim for `palo007.github.io`. Chrome's site data for Questa stays, so the web app still has it.
+- **Force stop** is not a switch. The next app start re-arms the alarms and workers.
+- To keep the TWA as a backup with Kotlin as the main app, keep it installed and set the planned "Native reminders on/off" switch to off when it ships.
+- Uninstalling does not revoke the TWA's Dropbox token (§4).
+
+**Keys and passwords:** keep `android.keystore` and its backup (§6). **Delete `keystore.pass` after each build**; keep the password in DPAPI (`sign-release.ps1`) and in your password manager. Leave `.well-known/assetlinks.json` and `.nojekyll` on the site (§3).
+
+## 11. History
 
 - **Bring-up (pre-Phase-1):** fullscreen TWA verification fixed (§3 root-cause ledger); signed sideload APK working.
 - **Phase 1A (2026-09-24):** headless quick-log design — `/inbox/<uuid>.json`, claim-by-move, PWA-side consumer.
@@ -260,9 +371,12 @@ Note: `.gitignore` ignores `/app`, `build.gradle` and `twa-manifest.json`. New f
 
 Local, git-invisible evidence trail (`Documents\Opti\.cline\`): `evidence/task-twa-spike-questa-native-wrapper.txt`, `notepads/questa-native-wrapper/learnings.md`, `drafts/` + `plans/questa-native-wrapper.md`. This README is the durable, shared copy of everything above.
 
-## 11. Open items
+## 12. Open items
 
 - [ ] **Proof B:** two rapid taps on two habits while the TWA is open → two logs, no miss, no double. Not yet formally recorded.
-- [ ] **Keystore backup:** `android.keystore` + passwords into an encrypted backup. Losing it means losing update capability for any store build.
-- [ ] **Play-store readiness** (separate work): privacy policy, Play App Signing, store listing; the `assetstatements` meta-data already embeds the statement the Play verifier expects.
+- [ ] **Keystore backup:** `android.keystore` + passwords into an encrypted backup, 2 places, restore tested (how-to in §6). Losing it means losing update capability.
+- [ ] **"Native reminders on/off" switch** (planned, §10) so the TWA can stay installed next to the Kotlin app without duplicate reminders.
+- [ ] **`tools/check.ps1`** (planned, §3): read-only DAL / `.nojekyll` check.
+- [ ] **Developer verification review:** Q1 2027 (§6).
+- **Play store: not planned** (decision 2026-09-26). The TWA stays sideload-only and keeps `USE_EXACT_ALARM`. If this ever changes: add the Play signing SHA-256 to `assetlinks.json` as a second entry before the first upload.
 - [ ] **Owner device checklist** (plan `android-inbox-step1.md` todos 14, 17): reminder in 5 min, lock phone, swipe app away, reboot, MIUI Autostart/Battery settings.
