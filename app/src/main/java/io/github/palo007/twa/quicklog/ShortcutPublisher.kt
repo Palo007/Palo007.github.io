@@ -20,44 +20,94 @@ object ShortcutPublisher {
     private const val CONNECT_ID = "ql-connect"
     const val MAX_ITEMS = 3
 
+    /** What habits_json holds: nothing, something we cannot parse, or a valid list (may be empty). */
+    internal sealed class Stored {
+        object None : Stored()
+        object Unreadable : Stored()
+        data class Ok(val habits: List<Habit>) : Stored()
+    }
+
+    internal fun storedHabits(text: String?): Stored {
+        if (text == null) return Stored.None
+        val l = parseHabitList(text) ?: return Stored.Unreadable
+        return Stored.Ok(l)
+    }
+
+    /**
+     * [add] = ids publish() builds and pushes (in order: [connect] item first, then [items]);
+     * [keep] = existing ids left untouched; [remove] = existing ids to drop.
+     * [connect] null = no connect item, false = "Connect", true = "Reconnect".
+     */
+    internal data class Plan(
+        val keep: Set<String>,
+        val add: Set<String>,
+        val remove: Set<String>,
+        val connect: Boolean?,
+        val items: List<ShortcutItem>,
+        val writeSignature: Boolean,
+    )
+
+    internal fun habitShortcutId(item: ShortcutItem): String =
+        if (item.dir == -1) PREFIX + "h-" + item.habit.id + "-down" else PREFIX + "h-" + item.habit.id
+
+    internal fun plannedShortcutIds(
+        connected: Boolean,
+        broken: Boolean,
+        stored: Stored,
+        currentOurs: Collection<String>,
+    ): Plan {
+        // Not connected: only "Connect Dropbox". Login expired: "Reconnect Dropbox" plus
+        // fewer habits, so taps keep queueing safely until the user reconnects.
+        if (!connected) {
+            val add = setOf(CONNECT_ID)
+            return Plan(emptySet(), add, currentOurs.toSet() - add, false, emptyList(), true)
+        }
+        val all = (stored as? Stored.Ok)?.habits ?: emptyList()
+        val items = pickShortcutItems(all, if (broken) MAX_ITEMS - 1 else MAX_ITEMS)
+        val add = LinkedHashSet<String>()
+        if (broken) add.add(CONNECT_ID)
+        items.forEach { add.add(habitShortcutId(it)) }
+        return Plan(emptySet(), add, currentOurs.toSet() - add, if (broken) true else null, items, true)
+    }
+
     @Synchronized
     fun publish(ctx: Context) {
         val app = ctx.applicationContext
         val p = DropboxAuth.prefs(app)
         val connected = DropboxAuth.isConnected(app)
         val broken = connected && DropboxAuth.isAuthBroken(app)
-        val all: List<Habit>? = p.getString(KEY_HABITS_JSON, null)?.let { parseHabitList(it) }
-
-        // Not connected: only "Connect Dropbox". Login expired: "Reconnect Dropbox" plus
-        // fewer habits, so taps keep queueing safely until the user reconnects.
-        val desired: List<ShortcutInfoCompat> = when {
-            !connected -> listOf(connectShortcut(app, false))
-            else -> {
-                val items = pickShortcutItems(all ?: emptyList(), if (broken) MAX_ITEMS - 1 else MAX_ITEMS)
-                    .mapIndexed { i, item -> habitShortcut(app, item, i + if (broken) 1 else 0) }
-                if (broken) listOf(connectShortcut(app, true)) + items else items
-            }
-        }
+        val stored = storedHabits(p.getString(KEY_HABITS_JSON, null))
 
         val ours = ShortcutManagerCompat.getDynamicShortcuts(app).map { it.id }.filter { it.startsWith(PREFIX) }
+        val plan = plannedShortcutIds(connected, broken, stored, ours)
+
+        val offset = if (plan.connect != null) 1 else 0
+        val desired: List<ShortcutInfoCompat> =
+            (if (plan.connect != null) listOf(connectShortcut(app, plan.connect)) else emptyList()) +
+                plan.items.mapIndexed { i, item -> habitShortcut(app, item, i + offset) }
+
         val sig = desired.joinToString("|") { it.id + "=" + it.shortLabel }
         // Launchers rate-limit background updates; skip when nothing changed.
-        if (sig == p.getString(KEY_SIGNATURE, null) && ours.toSet() == desired.map { it.id }.toSet()) return
+        if (plan.writeSignature) {
+            if (sig == p.getString(KEY_SIGNATURE, null) && ours.toSet() == plan.keep + plan.add) return
+        } else {
+            if (plan.remove.isEmpty() && ours.toSet().containsAll(plan.add)) return
+        }
 
-        val stale = ours - desired.map { it.id }.toSet()
+        val stale = plan.remove.toList()
         if (stale.isNotEmpty()) ShortcutManagerCompat.removeDynamicShortcuts(app, stale)
         if (desired.isNotEmpty() && !ShortcutManagerCompat.addDynamicShortcuts(app, desired)) return
 
         // A habit pinned to the home screen but deleted in Questa: grey it out instead of
         // letting it log to an id the PWA would reject.
-        if (connected && !broken && all != null) {
-            val known = all.flatMap { listOf(PREFIX + "h-" + it.id, PREFIX + "h-" + it.id + "-down") }.toSet()
+        if (connected && !broken && stored is Stored.Ok) {
+            val known = stored.habits.flatMap { listOf(PREFIX + "h-" + it.id, PREFIX + "h-" + it.id + "-down") }.toSet()
             val gone = ShortcutManagerCompat.getShortcuts(app, ShortcutManagerCompat.FLAG_MATCH_PINNED)
                 .map { it.id }
                 .filter { it.startsWith(PREFIX + "h-") && it !in known }
             if (gone.isNotEmpty()) ShortcutManagerCompat.disableShortcuts(app, gone, "Habit no longer in Questa")
         }
-        p.edit().putString(KEY_SIGNATURE, sig).apply()
+        if (plan.writeSignature) p.edit().putString(KEY_SIGNATURE, sig).apply()
     }
 
     private fun icon(ctx: Context) = IconCompat.createWithResource(ctx, R.drawable.shortcut_0)
@@ -65,7 +115,7 @@ object ShortcutPublisher {
     private fun habitShortcut(ctx: Context, item: ShortcutItem, rank: Int): ShortcutInfoCompat {
         val h = item.habit
         val dir = item.dir
-        val id = if (dir == -1) PREFIX + "h-" + h.id + "-down" else PREFIX + "h-" + h.id
+        val id = habitShortcutId(item)
         val label = if (dir == -1) "−" + "1 " + h.title else "+1 " + h.title
         val intent = Intent(QuickLogActivity.ACTION)
             .setClass(ctx, QuickLogActivity::class.java)
