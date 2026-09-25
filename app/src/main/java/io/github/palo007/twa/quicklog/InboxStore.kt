@@ -31,18 +31,65 @@ class InboxStore(private val dir: File) {
 
     fun count(): Int = list().size
 
+    private val rejectedDir get() = File(dir, "rejected")
+    private val failDir get() = File(dir, ".fail")
+
+    /** Only after Dropbox confirmed the upload (or reported a conflict). Drops the failure counter. */
     fun delete(f: File) {
         f.delete()
+        File(failDir, f.name).delete()
     }
 
-    // Step-0 seam (HEAD semantics): no sweep, no rejected folder, no failure counter.
-    fun sweepTmp(nowMs: Long, maxAgeMs: Long = TMP_MAX_AGE_MS) {}
+    /**
+     * A `.tmp` older than [maxAgeMs] is left over from a crash between write and rename (see [write]).
+     * It may hold a whole tap, so it is parked in rejected/ (never deleted). Younger ones may belong to a
+     * write in progress and stay. Stale counter tmps in .fail/ are not taps and are deleted.
+     */
+    fun sweepTmp(nowMs: Long, maxAgeMs: Long = TMP_MAX_AGE_MS) {
+        fun old(f: File) = f.isFile && f.name.endsWith(".tmp") && nowMs - f.lastModified() > maxAgeMs
+        dir.listFiles()?.filter(::old)?.forEach { reject(it) }
+        failDir.listFiles()?.filter(::old)?.forEach { it.delete() }
+    }
 
-    fun reject(f: File): Boolean = false
+    /**
+     * Moves a tap that cannot be uploaded out of the queue into inbox/rejected/ (kept on the phone,
+     * bytes unchanged; [list] ignores sub-folders). Never overwrites an earlier rejected file.
+     * Returns false if the move failed; the file then stays in the queue.
+     */
+    fun reject(f: File): Boolean {
+        val rej = rejectedDir
+        if (!rej.isDirectory && !rej.mkdirs()) return false
+        var target = File(rej, f.name)
+        var n = 1
+        while (target.exists()) target = File(rej, "${f.name}.${n++}")
+        if (!f.renameTo(target)) return false
+        File(failDir, f.name).delete()
+        return true
+    }
 
-    fun rejectedCount(): Int = 0
+    /** Taps kept on the phone that will not be uploaded (for Settings: "Could not upload: N"). */
+    fun rejectedCount(): Int = rejectedDir.listFiles { f -> f.isFile }?.size ?: 0
 
-    fun recordFailure(f: File): Int = 0
+    /**
+     * Counts one non-network upload failure for [f] in inbox/.fail/<name> and returns the new total.
+     * Written tmp-then-rename like [write]. If the counter cannot be stored the count restarts, which
+     * only delays a rejection (never loses a tap).
+     */
+    fun recordFailure(f: File): Int {
+        val fd = failDir
+        val counter = File(fd, f.name)
+        val next = (counter.takeIf { it.isFile }?.readText(Charsets.UTF_8)?.trim()?.toIntOrNull() ?: 0) + 1
+        try {
+            if (!fd.isDirectory && !fd.mkdirs()) return next
+            val tmp = File(fd, f.name + ".tmp")
+            tmp.writeText(next.toString(), Charsets.UTF_8)
+            // POSIX rename replaces atomically; a platform that refuses to replace gets delete + rename.
+            if (!tmp.renameTo(counter) && !(counter.delete() && tmp.renameTo(counter))) tmp.delete()
+        } catch (e: IOException) {
+            // keep going: see above
+        }
+        return next
+    }
 
     companion object {
         const val TMP_MAX_AGE_MS = 60L * 60L * 1000L

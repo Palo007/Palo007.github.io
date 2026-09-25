@@ -12,6 +12,7 @@ import androidx.work.Worker
 import androidx.work.WorkerParameters
 import com.dropbox.core.DbxException
 import com.dropbox.core.InvalidAccessTokenException
+import com.dropbox.core.NetworkIOException
 import com.dropbox.core.v2.files.UploadErrorException
 import com.dropbox.core.v2.files.WriteMode
 import java.io.IOException
@@ -22,6 +23,7 @@ import java.util.concurrent.TimeUnit
  * The local file is deleted only after Dropbox confirmed it. A name conflict means an
  * earlier run already uploaded it (reply lost): delete locally. A re-upload after the PWA
  * already consumed the file is harmless: the PWA skips a uid it has seen (plan D3).
+ * A tap that cannot upload (see [UploadPolicy]) moves to inbox/rejected/ on the phone; it is never deleted.
  */
 class InboxUploadWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params) {
 
@@ -32,10 +34,24 @@ class InboxUploadWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, pa
         val store = InboxStore(ctx)
         var uploaded = 0
         var retry = false
+        store.sweepTmp(System.currentTimeMillis())
         for (f in store.list()) {
             if (isStopped) return Result.retry()
             val id = f.name.removeSuffix(".json")
-            if (!InboxRecord.ID_RE.matches(id)) continue
+            // A bad name can never upload; park it instead of skipping it for ever.
+            if (!InboxRecord.ID_RE.matches(id)) {
+                store.reject(f)
+                continue
+            }
+            // Routes one failure through UploadPolicy; only non-network kinds are counted.
+            fun failed(kind: UploadPolicy.Kind) {
+                val attempts = if (UploadPolicy.counts(kind)) store.recordFailure(f) else 0
+                when (UploadPolicy.decide(kind, attempts)) {
+                    UploadPolicy.Action.DELETE -> store.delete(f)
+                    UploadPolicy.Action.REJECT -> if (!store.reject(f)) retry = true
+                    UploadPolicy.Action.RETRY -> retry = true
+                }
+            }
             try {
                 f.inputStream().use { input ->
                     client.files().uploadBuilder("/inbox/$id.json")
@@ -47,21 +63,18 @@ class InboxUploadWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, pa
                 store.delete(f)
                 uploaded++
             } catch (e: UploadErrorException) {
-                val err = e.errorValue
-                if (err.isPath && err.pathValue.reason.isConflict) {
-                    store.delete(f)
-                } else {
-                    retry = true
-                }
+                failed(UploadPolicy.kindOf(e))
             } catch (e: InvalidAccessTokenException) {
                 // Token revoked or expired for good: stop, keep every file, ask the user to reconnect.
                 DropboxAuth.markAuthBroken(ctx)
                 ShortcutPublisher.publish(ctx)
                 return Result.failure()
+            } catch (e: NetworkIOException) {
+                failed(UploadPolicy.Kind.NETWORK)
             } catch (e: DbxException) {
-                retry = true
+                failed(UploadPolicy.Kind.DBX_OTHER)
             } catch (e: IOException) {
-                retry = true
+                failed(UploadPolicy.Kind.NETWORK)
             }
         }
         if (uploaded > 0) {
@@ -87,17 +100,28 @@ class InboxUploadWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, pa
     }
 }
 
-/** Pure upload decision, JVM-testable. Step-0 seam: HEAD semantics (only a conflict deletes). */
+/**
+ * Pure upload decision, JVM-testable (TWA-C4). A conflict means Dropbox already has the tap: delete.
+ * A name Dropbox refuses can never upload: reject at once. Any other non-network error is retried
+ * up to [MAX_ATTEMPTS] runs, then rejected. Network errors retry for ever and never count.
+ * REJECT keeps the tap on the phone (inbox/rejected/); nothing here deletes an unconfirmed tap.
+ */
 internal object UploadPolicy {
     enum class Kind { CONFLICT, TERMINAL, OTHER_UPLOAD, DBX_OTHER, NETWORK }
     enum class Action { DELETE, RETRY, REJECT }
 
+    /** ~4-5 days with WorkManager's exponential back-off (30 s base, 5 h cap). Design Q3. */
     const val MAX_ATTEMPTS = 30
 
-    fun decide(kind: Kind, attempts: Int): Action =
-        if (kind == Kind.CONFLICT) Action.DELETE else Action.RETRY
+    fun decide(kind: Kind, attempts: Int): Action = when (kind) {
+        Kind.CONFLICT -> Action.DELETE
+        Kind.TERMINAL -> Action.REJECT
+        Kind.NETWORK -> Action.RETRY
+        Kind.OTHER_UPLOAD, Kind.DBX_OTHER -> if (attempts >= MAX_ATTEMPTS) Action.REJECT else Action.RETRY
+    }
 
-    fun counts(kind: Kind): Boolean = false
+    /** Whether a failure of this kind is recorded against the file. */
+    fun counts(kind: Kind): Boolean = kind == Kind.OTHER_UPLOAD || kind == Kind.DBX_OTHER
 
     fun kindOf(e: UploadErrorException): Kind {
         val err = e.errorValue
