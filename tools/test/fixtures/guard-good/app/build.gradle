@@ -1,0 +1,7 @@
+// fixture
+dependencies {
+    implementation 'androidx.glance:glance-appwidget:1.1.1' // HAND-OWNED (quick-log widget)
+}
+android {
+    buildFeatures { compose true } // HAND-OWNED (quick-log widget)
+}
