@@ -27,6 +27,14 @@ class ShortcutPlanTest {
         assertEquals(true, p.connect)
     }
 
+    @Test fun unreadableNotBrokenRemovesStaleConnectKeepsHabits() {
+        val withConnect = current + "ql-connect"
+        val p = ShortcutPublisher.plannedShortcutIds(true, false, ShortcutPublisher.storedHabits("""{"v":2}"""), withConnect)
+        assertEquals(setOf("ql-connect"), p.remove)
+        assertEquals(current.toSet(), p.keep)
+        assertEquals(emptySet<String>(), p.add)
+    }
+
     @Test fun validEmptyListClearsHabitShortcuts() {
         val p = plan(connected = true, broken = false, text = """{"v":1,"habits":[]}""")
         assertEquals(current.toSet(), p.remove)
