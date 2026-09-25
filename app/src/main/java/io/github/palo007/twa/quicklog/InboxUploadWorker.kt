@@ -13,6 +13,8 @@ import androidx.work.WorkerParameters
 import com.dropbox.core.DbxException
 import com.dropbox.core.InvalidAccessTokenException
 import com.dropbox.core.NetworkIOException
+import com.dropbox.core.RetryException
+import com.dropbox.core.ServerException
 import com.dropbox.core.v2.files.UploadErrorException
 import com.dropbox.core.v2.files.WriteMode
 import java.io.IOException
@@ -69,10 +71,8 @@ class InboxUploadWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, pa
                 DropboxAuth.markAuthBroken(ctx)
                 ShortcutPublisher.publish(ctx)
                 return Result.failure()
-            } catch (e: NetworkIOException) {
-                failed(UploadPolicy.Kind.NETWORK)
             } catch (e: DbxException) {
-                failed(UploadPolicy.Kind.DBX_OTHER)
+                failed(UploadPolicy.kindOfDbx(e))
             } catch (e: IOException) {
                 failed(UploadPolicy.Kind.NETWORK)
             }
@@ -122,6 +122,16 @@ internal object UploadPolicy {
 
     /** Whether a failure of this kind is recorded against the file. */
     fun counts(kind: Kind): Boolean = kind == Kind.OTHER_UPLOAD || kind == Kind.DBX_OTHER
+
+    /**
+     * Any other SDK error (UploadErrorException and InvalidAccessTokenException are caught before).
+     * DL-24: rate limit (429, RateLimitException is a RetryException) and server errors (5xx) are a
+     * Dropbox outage, not the file's fault: treated like the network, never counted.
+     */
+    fun kindOfDbx(e: DbxException): Kind = when (e) {
+        is NetworkIOException, is RetryException, is ServerException -> Kind.NETWORK
+        else -> Kind.DBX_OTHER
+    }
 
     fun kindOf(e: UploadErrorException): Kind {
         val err = e.errorValue
