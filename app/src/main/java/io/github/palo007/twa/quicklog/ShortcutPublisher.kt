@@ -62,6 +62,16 @@ object ShortcutPublisher {
             val add = setOf(CONNECT_ID)
             return Plan(emptySet(), add, currentOurs.toSet() - add, false, emptyList(), true)
         }
+        // TWA-C1: a habits.json we cannot parse must not wipe the launcher. Keep every
+        // existing habit item; only the connect item follows the auth state. No signature
+        // write, so the next valid list republishes normally. A valid empty list (Ok) or
+        // nothing stored (None) still clears the habit items.
+        if (stored is Stored.Unreadable) {
+            val connectIds = if (broken) setOf(CONNECT_ID) else emptySet()
+            val habits = currentOurs.filter { it != CONNECT_ID }.toSet()
+            val remove = currentOurs.toSet() - habits - connectIds
+            return Plan(habits, connectIds, remove, if (broken) true else null, emptyList(), false)
+        }
         val all = (stored as? Stored.Ok)?.habits ?: emptyList()
         val items = pickShortcutItems(all, if (broken) MAX_ITEMS - 1 else MAX_ITEMS)
         val add = LinkedHashSet<String>()
