@@ -9,8 +9,8 @@ import java.io.IOException
  * Local queue of taps not yet uploaded: one immutable file per tap in
  * filesDir/inbox/<id>.json. Survives reboot and app updates.
  */
-class InboxStore(context: Context) {
-    private val dir = File(context.filesDir, "inbox")
+class InboxStore(private val dir: File) {
+    constructor(context: Context) : this(File(context.filesDir, "inbox"))
 
     @Throws(IOException::class)
     fun write(rec: InboxRecord) {
@@ -33,5 +33,18 @@ class InboxStore(context: Context) {
 
     fun delete(f: File) {
         f.delete()
+    }
+
+    // Step-0 seam (HEAD semantics): no sweep, no rejected folder, no failure counter.
+    fun sweepTmp(nowMs: Long, maxAgeMs: Long = TMP_MAX_AGE_MS) {}
+
+    fun reject(f: File): Boolean = false
+
+    fun rejectedCount(): Int = 0
+
+    fun recordFailure(f: File): Int = 0
+
+    companion object {
+        const val TMP_MAX_AGE_MS = 60L * 60L * 1000L
     }
 }

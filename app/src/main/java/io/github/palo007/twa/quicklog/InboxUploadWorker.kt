@@ -86,3 +86,27 @@ class InboxUploadWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, pa
         }
     }
 }
+
+/** Pure upload decision, JVM-testable. Step-0 seam: HEAD semantics (only a conflict deletes). */
+internal object UploadPolicy {
+    enum class Kind { CONFLICT, TERMINAL, OTHER_UPLOAD, DBX_OTHER, NETWORK }
+    enum class Action { DELETE, RETRY, REJECT }
+
+    const val MAX_ATTEMPTS = 30
+
+    fun decide(kind: Kind, attempts: Int): Action =
+        if (kind == Kind.CONFLICT) Action.DELETE else Action.RETRY
+
+    fun counts(kind: Kind): Boolean = false
+
+    fun kindOf(e: UploadErrorException): Kind {
+        val err = e.errorValue
+        if (!err.isPath) return Kind.OTHER_UPLOAD
+        val reason = err.pathValue.reason
+        return when {
+            reason.isConflict -> Kind.CONFLICT
+            reason.isDisallowedName || reason.isMalformedPath -> Kind.TERMINAL
+            else -> Kind.OTHER_UPLOAD
+        }
+    }
+}
