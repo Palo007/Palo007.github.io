@@ -3,7 +3,9 @@ package io.github.palo007.twa;
 import android.app.Notification;
 import android.util.Log;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.TimeZone;
 
 import io.github.palo007.twa.quicklog.DropboxAuth;
@@ -54,25 +56,26 @@ public class DelegationService extends
         try {
             CharSequence titleCs = notification.extras.getCharSequence(Notification.EXTRA_TITLE);
             String title = titleCs != null ? titleCs.toString() : null;
-            if (title != null && isKnownReminderTitle(title)) {
+            if (title != null) {
                 CharSequence bodyCs = notification.extras.getCharSequence(Notification.EXTRA_TEXT);
                 String body = bodyCs != null ? bodyCs.toString() : null;
-                long now = System.currentTimeMillis();
-                TimeZone tz = TimeZone.getDefault();
-                String today = ReminderDedupe.localDateString(now, tz);
-                List<String> times = ReminderDedupe.candidateTimes(body, now, tz);
-
-                for (String time : times) {
-                    String slot = ReminderDedupe.buildSlotKey(title, today, time);
-                    if (ReminderDedupe.nativeShown(this, slot)) {
-                        Log.i(TAG, "dropped title=\"" + title + "\" slot=" + slot);
-                        return true; // Drop: native already showed this slot.
+                // HAND-OWNED (quick-log) P7: decision extracted to the pure ReminderDedupe.webDecision
+                // (JVM-tested for web/native key parity); behaviour unchanged.
+                ReminderDedupe.WebDecision d = ReminderDedupe.webDecision(
+                        title, body, System.currentTimeMillis(), TimeZone.getDefault(),
+                        knownReminderTitles(), slot -> ReminderDedupe.nativeShown(this, slot));
+                if (d instanceof ReminderDedupe.WebDecision.Drop) {
+                    String slot = ((ReminderDedupe.WebDecision.Drop) d).getSlot();
+                    Log.i(TAG, "dropped title=\"" + title + "\" slot=" + slot);
+                    return true; // Drop: native already showed this slot.
+                }
+                if (d instanceof ReminderDedupe.WebDecision.Pass) {
+                    List<String> slots = ((ReminderDedupe.WebDecision.Pass) d).getSlots();
+                    for (String slot : slots) {
+                        ReminderDedupe.markWeb(this, slot);
                     }
+                    Log.i(TAG, "passed title=\"" + title + "\" slots=" + slots);
                 }
-                for (String time : times) {
-                    ReminderDedupe.markWeb(this, ReminderDedupe.buildSlotKey(title, today, time));
-                }
-                Log.i(TAG, "passed title=\"" + title + "\" slots=" + times);
             }
         } catch (Throwable t) {
             // Never let dedupe bookkeeping break the web notification path.
@@ -80,15 +83,17 @@ public class DelegationService extends
         return super.onNotifyNotificationWithChannel(platformTag, platformId, notification, channelName);
     }
 
-    private boolean isKnownReminderTitle(String title) {
+    /** HAND-OWNED (quick-log): titles in the stored reminder list; empty if none or unparsable. */
+    private Set<String> knownReminderTitles() {
+        Set<String> out = new HashSet<>();
         String text = DropboxAuth.prefs(this).getString(ReminderSyncWorker.KEY_REMINDERS_JSON, null);
-        if (text == null) return false;
+        if (text == null) return out;
         List<ReminderItem> items = ReminderListKt.parseReminderList(text);
-        if (items == null) return false;
+        if (items == null) return out;
         for (ReminderItem item : items) {
-            if (title.equals(item.getTitle())) return true;
+            out.add(item.getTitle());
         }
-        return false;
+        return out;
     }
 }
 
