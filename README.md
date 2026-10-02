@@ -24,7 +24,7 @@ Why native code exists at all: a **closed web page cannot fire notifications or 
 - **Chrome owns Questa's data.** The PWA keeps its state in Chrome's site storage (`localStorage`/IndexedDB) for `palo007.github.io`. The APK holds no copy.
 - **Clearing Chrome data wipes Questa.** "Clear data" for Chrome, a Chrome uninstall or reset, or deleting the site data of `palo007.github.io` erases everything that is not yet in Dropbox. Android's "Clear storage" for Questa opens Chrome's site settings for the same data.
 - **`allowBackup` does not cover it.** `android:allowBackup="true"` backs up only the TWA's own native files. It never includes Chrome's storage.
-- **The Dropbox login is not backed up.** The backup rules (`res/xml/backup_rules.xml` for API 23–30, `res/xml/data_extraction_rules.xml` for API 31+) exclude the prefs file `questa_quicklog.xml` (Dropbox credential plus the reminder and habit cache). After a restore or a phone transfer, connect Dropbox again once; the cache fills again on the next sync. The upload queue (`files/inbox/*.json`) is backed up, so queued taps are kept (DL-15).
+- **The Dropbox login is not backed up.** The backup rules (`res/xml/backup_rules.xml` for API 23–30, `res/xml/data_extraction_rules.xml` for API 31+) exclude the prefs file `questa_quicklog.xml` (Dropbox credential plus the reminder and habit cache). They also exclude `questa_reminders.xml` (the "Native reminders" switch and the one-time question, DL-31), so a new phone starts with the switch on and asks again. After a restore or a phone transfer, connect Dropbox again once; the cache fills again on the next sync. The upload queue (`files/inbox/*.json`) is backed up, so queued taps are kept (DL-15).
 - **The only backups are Dropbox sync and the JSON export.** Sync often, and use **Export** in the PWA often. Keep the export file outside Chrome (Downloads and a copy off the phone).
 - **Open Questa once while online after install.** The first launch needs the network: the PWA service worker is not cached yet, and Chrome fetches the trust file (§3). After that, the service worker serves the app offline.
 - **No background execution on the web side.** A closed page cannot run code. Reminders and quick-log work in the background only because of the native code above.
@@ -194,7 +194,7 @@ A PWA cannot fire a notification while its page/tab is fully closed, so a remind
 | `quicklog/DropboxAuth.kt` | Dropbox Android SDK PKCE login; credential sealed with an AES-GCM Android Keystore key |
 | `quicklog/SettingsActivity.kt` | Connect/disconnect Dropbox, queue status, "Could not upload" + Try again, last-synced times, "Native reminders" switch, battery and Autostart buttons, permission-request buttons |
 | `quicklog/SettingsLogic.kt` | Pure helpers for Settings: battery button, OEM Autostart screens, "N min ago" text |
-| `quicklog/ReminderPrefs.kt` | "Native reminders" switch and the one-time "who fires reminders" question (own prefs file) |
+| `quicklog/ReminderPrefs.kt` | "Native reminders" switch and the one-time "who fires reminders" question (own prefs file `questa_reminders.xml`, not backed up, DL-31) |
 | `quicklog/LaunchSync.kt` | One delayed (3 min) reminder sync after each launch |
 | `quicklog/ProviderNotice.kt` | One-time Toast when Chrome is off or missing |
 | `quicklog/QuickLogBootstrap.kt` | Wires periodic workers on app start / Dropbox connect |
@@ -226,7 +226,7 @@ Use the real folder name of your JDK 17 install. `gradlew.bat --version` shows t
 
 `jcenter()` is removed from `build.gradle` (P8, marker `HAND-OWNED (build-hygiene P8)`), so it no longer blocks Gradle 9. Still bump Gradle only together with a matching AGP version.
 
-**Line-ending churn (until fixed):** after a build, `git status` can show `app/src/main/res/xml/shortcuts.xml` as changed, with no content change. Restore it before you commit: `git checkout -- app/src/main/res/xml/shortcuts.xml`. A `.gitattributes` fix may come in packet P9.
+**Line endings:** `.gitattributes` checks out `shortcuts.xml` with LF (P9), so a build leaves `git status` clean. After you pull this fix, run `git checkout -- app/src/main/res/xml/shortcuts.xml` once.
 
 **Build from a fresh clone:** Gradle does not read Bubblewrap's `~/.bubblewrap/config.json`, and `local.properties` is git-ignored. Tell Gradle where the SDK is, with one of these:
 - Set the variable for the shell: `set ANDROID_HOME=%USERPROFILE%\.bubblewrap\android_sdk` (PowerShell: `$env:ANDROID_HOME="$env:USERPROFILE\.bubblewrap\android_sdk"`).
@@ -290,7 +290,7 @@ Trigger: a new Android major release, or an AGP/Gradle bump. There is no Play de
 6. `PendingIntent` mutability rules (`ReminderReceiver.kt`, `ReminderScheduler.kt`).
 7. Exported components, and the boot / time-change receivers in `AndroidManifest.xml`.
 8. Background work: WorkManager periodic limits and any new foreground-service rules (no foreground service is used; keep it that way).
-9. Backup rules: `allowBackup`, `res/xml/backup_rules.xml` and `res/xml/data_extraction_rules.xml` still exclude the Dropbox credential prefs (`questa_quicklog.xml`) and still keep the upload queue (DL-15, §1).
+9. Backup rules: `allowBackup`, `res/xml/backup_rules.xml` and `res/xml/data_extraction_rules.xml` still exclude the Dropbox credential prefs (`questa_quicklog.xml`) and the reminder switch prefs (`questa_reminders.xml`, DL-31), and still keep the upload queue (DL-15, §1).
 10. UI of the two native screens (`QuickLogActivity`, `SettingsActivity`): edge-to-edge and predictive back.
 11. 16 KB page size: the APK has no native `.so` files.
 12. Gates: `pwsh tools\check.ps1` (unit tests, debug build, HAND-OWNED guard §9, DAL check §3), `assembleRelease`, then the phone checks (§13).
@@ -368,7 +368,7 @@ pwsh tools\hand-owned-guard.ps1 -UpdateBaseline    # after you add markers; comm
 | `app/build.gradle` | Kotlin plugin; top-level `kotlin { jvmTarget 1.8 }`; deps (Dropbox SDK 7.0.0, WorkManager 2.10.5, core 1.16.0, junit, org.json for tests); `proguardFiles 'proguard-rules.pro'`; `shortcuts: []` — no static shortcuts (habit items are the dynamic `ql-*` shortcuts built from `/inbox-meta/habits.json`) |
 | `twa-manifest.json` | `"shortcuts": []` — no static shortcuts, so `bubblewrap update` does not bring Habits/Dailies/Quick log back; `res/xml/shortcuts.xml` is an empty `<shortcuts/>` |
 | `app/src/main/AndroidManifest.xml` | `INTERNET` permission; `APPLICATION_PREFERENCES` filter moved to `quicklog.SettingsActivity`; `HAND-OWNED ... END HAND-OWNED` block with `QuickLogActivity`, `SettingsActivity`, Dropbox `AuthActivity`; `RECEIVE_BOOT_COMPLETED` + `SCHEDULE_EXACT_ALARM` (capped API 32) + `USE_EXACT_ALARM`; `ReminderReceiver` (not exported), `ReminderBootReceiver` (exported, boot/time/timezone/replace and exact-alarm permission change only); `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`; `<queries>` entry for the Kotlin app's `REMINDER_OWNER` action; `android:fullBackupContent` + `android:dataExtractionRules` on `<application>`; App Link `<data android:path="/Questa">` + `<data android:pathPrefix="/Questa/">` |
-| `app/src/main/res/xml/backup_rules.xml`, `data_extraction_rules.xml` | Backup rules that exclude `questa_quicklog.xml` (new files, DL-15) |
+| `app/src/main/res/xml/backup_rules.xml`, `data_extraction_rules.xml` | Backup rules that exclude `questa_quicklog.xml` and `questa_reminders.xml` (new files, DL-15, DL-31) |
 | `app/src/main/java/.../Application.java` | one line: `QuickLogBootstrap.onAppStart(this)` |
 | `app/proguard-rules.pro` | `-dontwarn` for optional Dropbox SDK classes; a comment recording that release builds keep `Log.i` (no `-assumenosideeffects` strip) |
 | `app/src/main/java/io/github/palo007/twa/quicklog/*.kt` | all quick-log + reminder code (new) |
@@ -432,7 +432,6 @@ Local, git-invisible evidence trail (`Documents\Opti\.cline\`): `evidence/task-t
 - [ ] **Owner device checklist** (plan `android-inbox-step1.md` todos 14, 17): reminder in 5 min, lock phone, swipe app away, reboot, MIUI Autostart/Battery settings.
 - [ ] **Phone checks after the fix plan:** §13.
 - [ ] **Known dedupe gaps P7-F1 / P7-F2** (§4.5): deferred with TWA-12.
-- [ ] **`shortcuts.xml` line endings** (§6): until a `.gitattributes` fix lands.
 - [ ] **`user-site/` copy** (§3): still tracked and published; untracking it needs a decision.
 
 ## 13. Checks to do on a phone
