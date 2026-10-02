@@ -71,6 +71,27 @@ class InboxStore(private val dir: File) {
     fun rejectedCount(): Int = rejectedDir.listFiles { f -> f.isFile }?.size ?: 0
 
     /**
+     * Settings "Try again" (DL-25): moves rejected taps back into the queue and returns how many moved.
+     * `<id>.json` and `<id>.json.<n>` (clash suffix from [reject]) go back as `<id>.json` with a fresh failure
+     * counter. Never overwrites a queued file (that one stays in rejected/ for a later try). Crash-left `.tmp`
+     * files may be half-written and stay parked. A failed rename leaves the file where it is; nothing is deleted.
+     */
+    fun requeueRejected(): Int {
+        val files = rejectedDir.listFiles { f -> f.isFile } ?: return 0
+        var moved = 0
+        for (f in files.sortedBy { it.name }) {
+            val target = REJECTED_NAME.matchEntire(f.name)?.groupValues?.get(1) ?: continue
+            val dest = File(dir, target)
+            if (dest.exists()) continue
+            if (f.renameTo(dest)) {
+                File(failDir, target).delete()
+                moved++
+            }
+        }
+        return moved
+    }
+
+    /**
      * Counts one non-network upload failure for [f] in inbox/.fail/<name> and returns the new total.
      * Written tmp-then-rename like [write]. If the counter cannot be stored the count restarts, which
      * only delays a rejection (never loses a tap).
@@ -94,5 +115,7 @@ class InboxStore(private val dir: File) {
 
     companion object {
         const val TMP_MAX_AGE_MS = 60L * 60L * 1000L
+        /** `<base>.json` optionally followed by a `.<digits>` clash suffix; `.tmp` names never match. */
+        private val REJECTED_NAME = Regex("""(.+\.json)(?:\.\d+)?""")
     }
 }

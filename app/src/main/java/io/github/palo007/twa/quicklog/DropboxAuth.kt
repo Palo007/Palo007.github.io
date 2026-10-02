@@ -7,6 +7,7 @@ import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import com.dropbox.core.DbxRequestConfig
 import com.dropbox.core.android.Auth
 import com.dropbox.core.oauth.DbxCredential
@@ -48,17 +49,39 @@ object DropboxAuth {
      * only take it while our own login is pending; otherwise a later resume would bring
      * back a credential the user already disconnected.
      */
-    fun captureLoginResult(ctx: Context): Boolean {
+    enum class LoginResult { NONE, CONNECTED, STORE_FAILED }
+
+    fun captureLoginResult(ctx: Context): LoginResult {
         val p = prefs(ctx)
-        if (!p.getBoolean(KEY_LOGIN_PENDING, false)) return false
-        val cred = Auth.getDbxCredential() ?: return false
+        if (!p.getBoolean(KEY_LOGIN_PENDING, false)) return LoginResult.NONE
+        val cred = Auth.getDbxCredential() ?: return LoginResult.NONE
+        // TWA-C5 / DL-10: a Keystore failure must not crash, and the token is never stored as plain text.
+        val sealed = sealOrNull(DbxCredential.Writer.writeToString(cred))
+        if (sealed == null) {
+            p.edit().putBoolean(KEY_LOGIN_PENDING, false).apply()
+            return LoginResult.STORE_FAILED
+        }
         p.edit()
-            .putString(KEY_CRED, CredentialCrypto.seal(DbxCredential.Writer.writeToString(cred)))
+            .putString(KEY_CRED, sealed)
             .putBoolean(KEY_LOGIN_PENDING, false)
             .putBoolean(KEY_AUTH_BROKEN, false)
             .apply()
-        return true
+        return LoginResult.CONNECTED
     }
+
+    /** Seals, or returns null if secure storage fails. Logs the exception class only (never message or data). */
+    internal fun sealOrNull(
+        plain: String,
+        sealer: (String) -> String = CredentialCrypto::seal,
+        log: (String) -> Unit = { Log.w(TAG, it) },
+    ): String? = try {
+        sealer(plain)
+    } catch (e: Exception) {
+        log("credential seal failed: ${e.javaClass.name}")
+        null
+    }
+
+    private const val TAG = "QuestaQuickLog"
 
     fun credential(ctx: Context): DbxCredential? {
         val sealed = prefs(ctx).getString(KEY_CRED, null) ?: return null
