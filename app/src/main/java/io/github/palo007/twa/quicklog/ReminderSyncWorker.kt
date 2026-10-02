@@ -22,6 +22,16 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
+/** P9 / P6-m1: result of one reminders.json download attempt. */
+internal enum class ReminderDownload { OK, UNREADABLE, NOT_FOUND, ERROR }
+
+/**
+ * P9 / P6-m1: whether the call reached Dropbox successfully, so "Questa last synced" (state.json
+ * metadata) is refreshed. A NotFound answer is still a successful sync (user has no reminders).
+ */
+internal fun recordsStateSync(outcome: ReminderDownload): Boolean =
+    outcome != ReminderDownload.ERROR
+
 /**
  * Downloads /inbox-meta/reminders.json (plan todo 16), keeps the last good JSON in prefs, then
  * re-arms all alarms. Mirrors ShortcutRefreshWorker's download/error pattern.
@@ -44,6 +54,7 @@ class ReminderSyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, p
             client.files().download(REMINDERS_PATH).download(out)
             val text = out.toString("UTF-8")
             val parsed = parseReminderList(text)
+            val outcome = if (parsed == null) ReminderDownload.UNREADABLE else ReminderDownload.OK
             if (parsed == null) {
                 setStatus(ctx, "Reminder list file is not readable (v1 expected).")
                 Log.i(TAG, "downloaded but unreadable (v1 expected)")
@@ -55,7 +66,7 @@ class ReminderSyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, p
                 Log.i(TAG, "downloaded ok items=${parsed.size}")
             }
             ReminderScheduler.rearm(ctx)
-            recordStateSynced(ctx, client)
+            if (recordsStateSync(outcome)) recordStateSynced(ctx, client)
             Result.success()
         } catch (e: DownloadErrorException) {
             if (e.errorValue.isPath && e.errorValue.pathValue.isNotFound) {
@@ -63,6 +74,8 @@ class ReminderSyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, p
                 setStatus(ctx, "No reminder list yet. Open Questa once and let it sync.")
                 Log.i(TAG, "not found on Dropbox yet")
                 ReminderScheduler.rearm(ctx)
+                // P9 / P6-m1: Dropbox answered, so "Questa last synced" is refreshed too.
+                if (recordsStateSync(ReminderDownload.NOT_FOUND)) recordStateSynced(ctx, client)
                 Result.success()
             } else {
                 Log.i(TAG, "download error, retrying", e)

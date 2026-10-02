@@ -20,6 +20,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.app.ActivityCompat
 
 /**
@@ -39,6 +40,8 @@ class SettingsActivity : Activity() {
     private lateinit var allowBattery: Button
     private lateinit var autostart: Button
     private var ownerDialog: AlertDialog? = null
+    /** P9 / P1d-m2: the A8 fallback hint was requested (no exact-alarm screen on this build). */
+    private var exactAlarmHint = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -80,9 +83,9 @@ class SettingsActivity : Activity() {
                                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
                             )
                         } catch (e2: ActivityNotFoundException) { }
-                        remindersStatus.append(
-                            "\nOpen Android Settings > Apps > Questa > Alarms & reminders and allow it."
-                        )
+                        // P9 / P1d-m2: kept as state so render() (onResume) does not wipe it.
+                        exactAlarmHint = true
+                        render()
                     }
                 }
             }
@@ -91,8 +94,10 @@ class SettingsActivity : Activity() {
             text = "Try again"
             setOnClickListener {
                 // DL-25: rejected taps back into the queue, then upload.
-                InboxStore(this@SettingsActivity).requeueRejected()
+                val moved = InboxStore(this@SettingsActivity).requeueRejected()
                 InboxUploadWorker.enqueue(this@SettingsActivity)
+                // P9 / P1d-m3: 0 moved (e.g. all clash with queued files) must not look like nothing happened.
+                retryToast(moved)?.let { Toast.makeText(this@SettingsActivity, it, Toast.LENGTH_SHORT).show() }
                 render()
             }
         }
@@ -222,6 +227,9 @@ class SettingsActivity : Activity() {
             .append(syncAgeLine(p.getLong(ReminderSyncWorker.KEY_REMINDERS_OK, 0L), now))
         rsb.append("\nLast checked: ").append(ago(lastReminderRefresh))
         rsb.append("\nExact alarms: ").append(if (exactAllowed) "yes" else "no")
+        if (showExactAlarmHint(exactAlarmHint, exactAllowed)) {
+            rsb.append("\nOpen Android Settings > Apps > Questa > Alarms & reminders and allow it.")
+        }
         if (reminderStatusMsg != null) rsb.append("\n").append(reminderStatusMsg)
         val ignoring = isIgnoringBattery()
         if (Build.VERSION.SDK_INT >= 23) {

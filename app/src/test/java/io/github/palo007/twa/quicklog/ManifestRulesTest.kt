@@ -15,6 +15,7 @@ class ManifestRulesTest {
     private val androidNs = "http://schemas.android.com/apk/res/android"
     private val manifestFile = File("src/main/AndroidManifest.xml")
     private val credPrefs = "questa_quicklog.xml" // DropboxAuth.prefs() file name
+    private val reminderPrefs = "questa_reminders.xml" // ReminderPrefs FILE (P9 / DL-31: not restored)
 
     private fun parse(f: File): Document {
         assertTrue("missing ${f.path}", f.isFile)
@@ -61,15 +62,20 @@ class ManifestRulesTest {
         assertMarkerBefore("<application")
     }
 
-    /** Only exclude rules; the credential prefs excluded; the upload queue (file/inbox) not excluded. */
+    /**
+     * Only exclude rules; the credential prefs and (P9 / DL-31) the native-reminders prefs excluded;
+     * the upload queue (file/inbox) not excluded.
+     */
     private fun assertExcludesOnlyCredential(scope: Element, label: String) {
         assertTrue("$label: no <include> (would drop the queue from backup)", elements(scope, "include").isEmpty())
         val ex = elements(scope, "exclude")
-        assertTrue("$label: excludes sharedpref/$credPrefs",
-            ex.any { it.getAttribute("domain") == "sharedpref" && it.getAttribute("path") == credPrefs })
+        for (prefs in listOf(credPrefs, reminderPrefs)) {
+            assertTrue("$label: excludes sharedpref/$prefs",
+                ex.any { it.getAttribute("domain") == "sharedpref" && it.getAttribute("path") == prefs })
+        }
         assertFalse("$label: must not exclude the inbox queue",
             ex.any { it.getAttribute("domain") == "file" || it.getAttribute("path").startsWith("inbox") })
-        assertEquals("$label: only one exclude", 1, ex.size)
+        assertEquals("$label: only the two prefs excludes", 2, ex.size)
     }
 
     @Test fun fullBackupContentExcludesCredentialOnly() {
