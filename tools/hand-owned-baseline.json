@@ -1,9 +1,9 @@
 {
   "marker": "HAND-OWNED (quick-log",
   "definition": "lines containing marker in git ls-files, excluding *.md and tools/**, working tree",
-  "commit": "24384e2",
-  "totalLines": 64,
-  "totalFiles": 42,
+  "commit": "5b25269",
+  "totalLines": 65,
+  "totalFiles": 43,
   "files": {
     "app/build.gradle": 5,
     "app/proguard-rules.pro": 2,
@@ -31,6 +31,7 @@
     "app/src/main/java/io/github/palo007/twa/quicklog/ShortcutRefreshWorker.kt": 1,
     "app/src/main/res/xml/backup_rules.xml": 1,
     "app/src/main/res/xml/data_extraction_rules.xml": 1,
+    "app/src/test/java/io/github/palo007/twa/quicklog/CredentialCryptoTest.kt": 1,
     "app/src/test/java/io/github/palo007/twa/quicklog/CredentialFormatTest.kt": 1,
     "app/src/test/java/io/github/palo007/twa/quicklog/HabitListTest.kt": 1,
     "app/src/test/java/io/github/palo007/twa/quicklog/InboxRecordTest.kt": 1,
