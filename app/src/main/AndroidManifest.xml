@@ -51,6 +51,10 @@
         <intent>
             <action android:name="android.support.customtabs.action.CustomTabsService" />
         </intent>
+        <!-- HAND-OWNED (quick-log, P6 / DL-03): see the Questa (Kotlin) app's reminder-owner marker. Re-add after `bubblewrap update`. -->
+        <intent>
+            <action android:name="io.github.palo007.questa.action.REMINDER_OWNER" />
+        </intent>
     </queries>
 
     <!-- HAND-OWNED (quick-log, P5 / DL-15): backup rules exclude only the Dropbox credential prefs
@@ -267,6 +271,8 @@
                 <action android:name="android.intent.action.TIME_SET" />
                 <action android:name="android.intent.action.TIMEZONE_CHANGED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <!-- HAND-OWNED (quick-log, P6 / TWA-A6): exact-alarm grant on API 31-32. -->
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
         <!-- ===== END HAND-OWNED (quick-log) ===== -->

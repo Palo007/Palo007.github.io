@@ -15,7 +15,9 @@ import androidx.work.Worker
 import androidx.work.WorkerParameters
 import com.dropbox.core.DbxException
 import com.dropbox.core.InvalidAccessTokenException
+import com.dropbox.core.v2.DbxClientV2
 import com.dropbox.core.v2.files.DownloadErrorException
+import com.dropbox.core.v2.files.FileMetadata
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -46,11 +48,14 @@ class ReminderSyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, p
                 setStatus(ctx, "Reminder list file is not readable (v1 expected).")
                 Log.i(TAG, "downloaded but unreadable (v1 expected)")
             } else {
-                p.edit().putString(KEY_REMINDERS_JSON, text).apply()
+                // P6 / DL-16: time of the last good download (phone side), never `updatedAt`.
+                p.edit().putString(KEY_REMINDERS_JSON, text)
+                    .putLong(KEY_REMINDERS_OK, System.currentTimeMillis()).apply()
                 setStatus(ctx, null)
                 Log.i(TAG, "downloaded ok items=${parsed.size}")
             }
             ReminderScheduler.rearm(ctx)
+            recordStateSynced(ctx, client)
             Result.success()
         } catch (e: DownloadErrorException) {
             if (e.errorValue.isPath && e.errorValue.pathValue.isNotFound) {
@@ -82,6 +87,11 @@ class ReminderSyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, p
         const val KEY_REMINDERS_JSON = "reminders_json"
         const val KEY_LAST_REFRESH = "reminders_refresh_ms"
         const val KEY_STATUS = "reminders_status"
+        /** P6 / DL-16: ms of the last good reminders.json download. */
+        const val KEY_REMINDERS_OK = "reminders_ok_ms"
+        /** P6 / DL-16: Dropbox server-modified ms of /state.json = when Questa (any device) last synced. */
+        const val KEY_STATE_SYNCED = "state_synced_ms"
+        const val STATE_PATH = "/state.json"
         private const val TAG = "QuestaReminder"
         private const val WORK_NOW = "questa-reminder-sync"
         private const val WORK_PERIODIC = "questa-reminder-sync-periodic"
@@ -91,6 +101,23 @@ class ReminderSyncWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, p
                 .putLong(KEY_LAST_REFRESH, System.currentTimeMillis())
                 .putString(KEY_STATUS, msg)
                 .apply()
+        }
+
+        /**
+         * DL-16: metadata only (the state file is never downloaded or parsed). Any failure keeps the
+         * old value and never fails the worker.
+         */
+        private fun recordStateSynced(ctx: Context, client: DbxClientV2) {
+            try {
+                val md = client.files().getMetadata(STATE_PATH)
+                if (md is FileMetadata) {
+                    DropboxAuth.prefs(ctx).edit().putLong(KEY_STATE_SYNCED, md.serverModified.time).apply()
+                }
+            } catch (e: DbxException) {
+                Log.i(TAG, "state.json metadata not read", e)
+            } catch (e: RuntimeException) {
+                Log.i(TAG, "state.json metadata not read", e)
+            }
         }
 
         private fun net() = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()

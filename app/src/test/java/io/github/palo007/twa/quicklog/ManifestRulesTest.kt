@@ -92,4 +92,26 @@ class ManifestRulesTest {
         assertTrue(elements(root, "uses-permission").any { it.a("name") == perm })
         assertMarkerBefore(perm)
     }
+
+    /** P6 / DL-03: Android 11+ package visibility for the Questa (Kotlin) app's owner marker. */
+    @Test fun reminderOwnerQueryDeclaredAndCustomTabsKept() {
+        val owner = "io.github.palo007.questa.action.REMINDER_OWNER"
+        val queries = elements(parse(manifestFile).documentElement, "queries")
+        val actions = queries.flatMap { elements(it, "action") }.map { it.a("name") }
+        assertTrue("owner action queried", actions.contains(owner))
+        assertTrue("CustomTabsService query kept", actions.contains("android.support.customtabs.action.CustomTabsService"))
+        assertMarkerBefore(owner)
+    }
+
+    /** P6 / TWA-A6: ReminderBootReceiver hears the exact-alarm grant (API 31-32). */
+    @Test fun bootReceiverListensForExactAlarmGrant() {
+        val action = "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"
+        val rx = elements(application(), "receiver").single { it.a("name") == ".quicklog.ReminderBootReceiver" }
+        val actions = elements(rx, "action").map { it.a("name") }
+        assertTrue(actions.contains(action))
+        assertTrue("old actions kept", actions.containsAll(listOf(
+            "android.intent.action.BOOT_COMPLETED", "android.intent.action.TIME_SET",
+            "android.intent.action.TIMEZONE_CHANGED", "android.intent.action.MY_PACKAGE_REPLACED")))
+        assertMarkerBefore(action)
+    }
 }
