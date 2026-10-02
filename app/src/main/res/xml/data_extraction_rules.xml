@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HAND-OWNED (quick-log, P5 / DL-15). Backup + device-transfer rules for API 31+
+     (android:dataExtractionRules). Excludes only the Dropbox credential prefs; the upload queue
+     (files/inbox/*.json) stays included. No <include>: that would switch to include-only mode. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="questa_quicklog.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="questa_quicklog.xml" />
+    </device-transfer>
+</data-extraction-rules>

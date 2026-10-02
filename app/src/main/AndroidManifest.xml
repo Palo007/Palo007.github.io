@@ -33,6 +33,8 @@
          USE_EXACT_ALARM does not apply. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32"/>
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <!-- HAND-OWNED (quick-log, P5 / DL-12): "Allow unrestricted battery" dialog for reliable reminders (sideloaded, not Play). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
 
     
@@ -51,9 +53,13 @@
         </intent>
     </queries>
 
+    <!-- HAND-OWNED (quick-log, P5 / DL-15): backup rules exclude only the Dropbox credential prefs
+         (questa_quicklog.xml); the upload queue (files/inbox) stays in backup. Re-add after `bubblewrap update`. -->
     <application
         android:name="Application"
         android:allowBackup="true"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/appName"
         
@@ -161,6 +167,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- HAND-OWNED (quick-log, P5 / TWA-19): App Link limited to /Questa and /Questa/... (not the
+                 whole host). Bubblewrap has no path option; re-add after `bubblewrap update`. -->
                         <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT" />
@@ -168,6 +176,8 @@
                 <data android:scheme="https"
                     android:host="@string/hostName"
                 />
+                <data android:pathPrefix="/Questa/" />
+                <data android:path="/Questa" />
             </intent-filter>
 
             
