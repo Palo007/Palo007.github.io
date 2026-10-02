@@ -93,7 +93,7 @@ Online cross-check: Digital Asset Links verifier — `https://developers.google.
 
 ```powershell
 pwsh tools\check.ps1              # env, assembleDebug, testDebugUnitTest, HAND-OWNED guard, DAL check
-pwsh tools\check.ps1 -NoBuild     # guard + DAL check only (pre-check before build-signed-apk.bat)
+pwsh tools\check.ps1 -NoBuild     # env + guard + DAL check only (pre-check before build-signed-apk.bat)
 pwsh tools\check.ps1 -Offline     # skip the published-file and DAL API network checks
 pwsh tools\dal-check.ps1 -Apk app-release-signed.apk   # user-run: compare the APK's public cert with assetlinks.json
 pwsh tools\test\run-tests.ps1     # self-test of the check scripts
@@ -218,7 +218,7 @@ A PWA cannot fire a notification while its page/tab is fully closed, so a remind
 | SDK platform / build-tools | android-36 / 35.0.0 and 36.1.0 |
 | `minSdkVersion` | 21 (kept on purpose, see §9) |
 
-**JDK 17 is required.** Gradle 8.11.1 cannot run on a newer JDK only. On a machine with only JDK 25, the build fails with "Unsupported class file major version 69". Install JDK 17 and point `JAVA_HOME` at it for the shell:
+**JDK 17 is required.** Gradle 8.11 does not run on JDK 25; use JDK 17. On a machine with only JDK 25, the build fails with "Unsupported class file major version 69". Install JDK 17 and point `JAVA_HOME` at it for the shell:
 - cmd: `set JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-17.0.17.10-hotspot`
 - PowerShell: `$env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-17.0.17.10-hotspot"`
 
@@ -385,7 +385,8 @@ Note: `/app`, `build.gradle`, the Gradle wrapper and `twa-manifest.json` are **t
 The Kotlin app has a different package, so both apps install side by side. Both show a launcher icon named "Questa". Both use the same Dropbox app folder (§4).
 
 **Who owns reminders:** when both apps are installed, **the Kotlin app owns reminders**. The Kotlin app fires reminders from its own database (DL-03; Kotlin repo, not checked here). The TWA fires its own alarms from `/inbox-meta/reminders.json` (written by the PWA). There is no dedupe between the two apps, so with both on you get 2 notifications per slot.
-- **"Native reminders" switch** (TWA Settings screen, DL-03). Off = the TWA cancels its alarms, arms none, and shows "Reminders: off". The reminder list still downloads. The web app is then no longer told to stay silent (`?nr=1` is not sent, §4.4). On = alarms come back.
+- **"Native reminders" switch** (TWA Settings screen, DL-03). Off = the TWA cancels its alarms, arms none, and shows "Reminders: off (native reminders switched off)". The reminder list still downloads. The web app is then no longer told to stay silent (`?nr=1` is not sent, §4.4). On = alarms come back.
+- The web app sees a switch change (the `nr=1` flag) only on the next launch of the TWA, not at once.
 - **Ask once, never turn off silently (DL-03):** when the TWA finds the Kotlin app (its `io.github.palo007.questa.action.REMINDER_OWNER` action), it asks once: "Questa app is installed. Let it fire reminders and turn them off here?" Yes = the switch goes off. No = it stays on. The TWA asks only once and never turns itself off by itself.
 - The question appears only when you open the TWA Settings screen. Until then, both apps can fire.
 - With the switch off, the web app can still show a reminder while it is open, and the Kotlin app can show the same one.
@@ -417,7 +418,7 @@ The Kotlin app has a different package, so both apps install side by side. Both 
 - **Phase 1C:** background reminders added — `/inbox-meta/reminders.json`, `ReminderScheduler`/`ReminderReceiver`/`ReminderBootReceiver`, `?nr=1` web/native silence flag (later revised, see 1D/4.4).
 - **Phase 1D:** dedupe introduced (title + 3-minute window) so native and web didn't double-notify; periodic reminder sync tightened to 15 min.
 - **Phase 1E (2026-09-24):** `USE_EXACT_ALARM` added after finding `SCHEDULE_EXACT_ALARM` wasn't auto-granted on API 34+ HyperOS; dedupe rewritten from a time-window heuristic to exact **slot identity** (`title|yyyy-MM-dd|HH:MM`) with separate native/web records; `QuestaReminder` logging added throughout.
-- **TWA fix plan (2026-10, packets P1a–P8, P2b):** reminders kept on a bad list, blank-date skip only, shortcuts kept on a bad list, bounded upload retries with `inbox/rejected/` and Try again, Keystore failure message, App Link limited to `/Questa`, backup excludes the Dropbox login, battery and Autostart buttons, last-synced lines, "Native reminders" switch, 3-minute launch sync, no-Chrome Toast, `jcenter()` removed, `tools/check.ps1` and the HAND-OWNED guard. Decisions DL-01…DL-30 are in the fix-plan ledger (outside this repo).
+- **TWA fix plan (2026-10, packets P1a–P9, P2b):** reminders kept on a bad list, blank-date skip only, shortcuts kept on a bad list, bounded upload retries with `inbox/rejected/` and Try again, Keystore failure message, App Link limited to `/Questa`, backup excludes the Dropbox login, battery and Autostart buttons, last-synced lines, "Native reminders" switch, 3-minute launch sync, no-Chrome Toast, `jcenter()` removed, `tools/check.ps1` and the HAND-OWNED guard; P9: `.gitattributes` for `shortcuts.xml`, reminder prefs not backed up (DL-31). Decisions DL-01…DL-32 are in the fix-plan ledger (outside this repo).
 
 Local, git-invisible evidence trail (`Documents\Opti\.cline\`): `evidence/task-twa-spike-questa-native-wrapper.txt`, `notepads/questa-native-wrapper/learnings.md`, `drafts/` + `plans/questa-native-wrapper.md`. This README is the durable, shared copy of everything above.
 
@@ -452,7 +453,7 @@ Do these with a release-signed APK on a real phone, unless the line says "debug 
 
 **Reminders and alarms**
 - [ ] Debug build: write `{"v":2}` into `reminders_json` with `adb shell run-as io.github.palo007.twa`, then open Settings → `adb shell dumpsys alarm | findstr palo007` still lists the reminder alarms.
-- [ ] Switch "Native reminders" off → "Reminders: off"; `adb shell dumpsys alarm | findstr palo007` shows no reminder alarms. Switch on → the count and the alarms come back.
+- [ ] Switch "Native reminders" off → "Reminders: off (native reminders switched off)"; `adb shell dumpsys alarm | findstr palo007` shows no reminder alarms. Switch on → the count and the alarms come back.
 - [ ] With the Kotlin Questa app installed: open Settings → the question shows once. Yes → switch off. Open Settings again → no question. On a clean phone: No → switch stays on, no question again.
 - [ ] API 31–32 phone: revoke the exact-alarm permission while alarms are armed → the alarm still fires in Doze.
 - [ ] API 31–32 phone without the grant: arm an inexact alarm for 23:59 that fires after midnight → web and native together show one notification, for the intended day.
@@ -473,7 +474,7 @@ Do these with a release-signed APK on a real phone, unless the line says "debug 
 - [ ] `adb shell bmgr enable true`, `adb shell bmgr backupnow io.github.palo007.twa`, then uninstall and install again (or `adb shell bmgr restore`) → Dropbox shows disconnected or asks to connect again; debug build: `adb shell run-as io.github.palo007.twa ls files/inbox` still lists the queued taps.
 
 **Battery, Autostart, last synced (DL-12, DL-16)**
-- [ ] Settings: "Battery: optimized" and the button "Allow unrestricted battery" → system dialog → Allow → back: the line says "unrestricted", the button is gone.
+- [ ] Settings: "Battery: optimized (reminders may be late)" and the button "Allow unrestricted battery" → system dialog → Allow → back: the line says "Battery: unrestricted", the button is gone.
 - [ ] Xiaomi/POCO: "Autostart (phone maker settings)" opens the MIUI/HyperOS Autostart list (or App info and a hint). Enable Questa.
 - [ ] Sync in the web app, wait up to 15 min → "Questa last synced (any device)" and "Reminder list downloaded" show minutes.
 
