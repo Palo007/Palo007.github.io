@@ -6,7 +6,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
-import java.io.File
 import java.util.TimeZone
 
 class InboxRecordTest {
@@ -56,13 +55,23 @@ class InboxRecordTest {
         }
     }
 
-    /** Writes samples for a one-off cross-check against the real web parser (node). */
-    @Test fun writeSamplesForWebCrossCheck() {
-        val out = File(System.getProperty("java.io.tmpdir"), "questa-inbox-samples")
-        out.mkdirs()
-        listOf("t_abc123", AWKWARD).forEachIndexed { i, h ->
-            val r = InboxRecord.create(h, summerMs + i, cest)
-            File(out, r.fileName).writeText(r.toJson(), Charsets.UTF_8)
-        }
+    /**
+     * TWA-C3: exact bytes the web parser (Opti sync.js inboxParseRecord) accepts. Both strings were
+     * checked once with node against the real parser (run note P1c.md). Escapes are JSON escapes.
+     */
+    @Test fun goldenBytesForWebParser() {
+        val plain = InboxRecord(id = "abcdefgh-0002", habitId = "t_abc123", dir = 1, ts = summerMs, tzOffsetMin = -120)
+        assertEquals(
+            "{\"v\":1,\"id\":\"abcdefgh-0002\",\"kind\":\"habit\",\"habitId\":\"t_abc123\"," +
+                "\"dir\":1,\"ts\":1790000000000,\"tzOffsetMin\":-120,\"src\":\"android-shortcut\"}",
+            plain.toJson(),
+        )
+        val awkward = InboxRecord(id = "abcdefgh-0001", habitId = AWKWARD, dir = 1, ts = summerMs, tzOffsetMin = -120)
+        assertEquals(
+            "{\"v\":1,\"id\":\"abcdefgh-0001\",\"kind\":\"habit\"," +
+                "\"habitId\":\"we\\\"ird\\\\id\\n\\u0001\\u2028ž\"," +
+                "\"dir\":1,\"ts\":1790000000000,\"tzOffsetMin\":-120,\"src\":\"android-shortcut\"}",
+            awkward.toJson(),
+        )
     }
 }
