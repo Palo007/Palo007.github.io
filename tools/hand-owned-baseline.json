@@ -1,7 +1,7 @@
 {
   "marker": "HAND-OWNED (quick-log",
   "definition": "lines containing marker in git ls-files, excluding *.md and tools/**, working tree",
-  "commit": "4b02f05",
+  "commit": "48e88ef",
   "totalLines": 71,
   "totalFiles": 47,
   "files": {

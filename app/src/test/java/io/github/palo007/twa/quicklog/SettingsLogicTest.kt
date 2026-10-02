@@ -60,4 +60,16 @@ class SettingsLogicTest {
         assertTrue(s, s.contains("open Questa to sync"))
         assertFalse(syncAgeLine(now - 7 * day, now).contains("open Questa"))
     }
+
+    @Test fun exactAlarmHintSurvivesRenderUntilAllowed() {
+        assertTrue(showExactAlarmHint(requested = true, exactAllowed = false))
+        assertFalse(showExactAlarmHint(requested = true, exactAllowed = true))
+        assertFalse(showExactAlarmHint(requested = false, exactAllowed = false))
+    }
+
+    @Test fun retryToastOnlyWhenNothingMoved() {
+        assertEquals("Nothing to retry", retryToast(0))
+        assertEquals(null, retryToast(1))
+        assertEquals(null, retryToast(3))
+    }
 }
