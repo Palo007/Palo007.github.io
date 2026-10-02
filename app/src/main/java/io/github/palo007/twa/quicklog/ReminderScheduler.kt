@@ -39,8 +39,11 @@ object ReminderScheduler {
      * Known limit: after a reboot the OS has dropped all alarms, so `Keep` cannot re-create them and
      * the armed-key count stays stale until the next good sync. The download path stores only
      * parseable lists, so this needs a stricter parser in a newer APK or corrupt prefs.
+     * [enabled] = the Settings "Native reminders" switch (P6); OFF wins over everything.
      */
-    internal fun rearmPlan(text: String?, armedBefore: Set<String>): RearmPlan {
+    internal fun rearmPlan(text: String?, armedBefore: Set<String>, enabled: Boolean = true): RearmPlan {
+        // P6 / DL-03: "Native reminders" OFF -> cancel every armed alarm, arm nothing.
+        if (!enabled) return RearmPlan.Apply(emptyList(), armedBefore)
         if (text == null) return RearmPlan.Apply(emptyList(), armedBefore)
         val items = parseReminderList(text) ?: return RearmPlan.Keep
         return RearmPlan.Apply(items, armedBefore - items.map { it.key }.toSet())
@@ -52,7 +55,7 @@ object ReminderScheduler {
         val p = DropboxAuth.prefs(app)
         val text = p.getString(ReminderSyncWorker.KEY_REMINDERS_JSON, null)
         val armedBefore = readArmedKeys(p)
-        val plan = rearmPlan(text, armedBefore)
+        val plan = rearmPlan(text, armedBefore, ReminderPrefs.isEnabled(app))
         if (plan !is RearmPlan.Apply) {
             Log.w(TAG, "rearm kept: stored list unreadable")
             return
@@ -121,6 +124,12 @@ object ReminderScheduler {
         // but only touch this key's alarm to avoid perturbing others mid-batch.
         val app = ctx.applicationContext
         val p = DropboxAuth.prefs(app)
+        if (!ReminderPrefs.isEnabled(app)) {
+            // P6 / DL-03: switched off between arm and fire: drop this key, do not re-arm.
+            alarmManager(app).cancel(pendingIntent(app, key))
+            writeArmedKeys(p, readArmedKeys(p) - key)
+            return
+        }
         val text = p.getString(ReminderSyncWorker.KEY_REMINDERS_JSON, null) ?: return
         val item = parseReminderList(text)?.firstOrNull { it.key == key } ?: return
         val now = System.currentTimeMillis()
@@ -142,12 +151,14 @@ object ReminderScheduler {
     /**
      * True when native alarms can plausibly fire: Dropbox connected, a parsed reminder list is
      * stored, and notifications are enabled. Exact-alarm permission is NOT required here (an
-     * inexact alarm still fires, just less precisely). Used by LauncherActivity to decide whether
+     * inexact alarm still fires, just less precisely). False when the "Native reminders" switch is OFF. Used by LauncherActivity to decide whether
      * the web app may go silent (`nr=1`) without leaving the user with no reminder at all.
      */
     @JvmStatic
     fun nativeReady(ctx: Context): Boolean {
         return try {
+            // P6 / DL-03: switched off -> native will not fire, so the web app must not go silent.
+            if (!ReminderPrefs.isEnabled(ctx)) return false
             if (!DropboxAuth.isConnected(ctx)) return false
             val text = DropboxAuth.prefs(ctx).getString(ReminderSyncWorker.KEY_REMINDERS_JSON, null)
                 ?: return false

@@ -35,7 +35,8 @@ class ReminderReceiver : BroadcastReceiver() {
         val text = DropboxAuth.prefs(ctx).getString(ReminderSyncWorker.KEY_REMINDERS_JSON, null)
         val item = text?.let { parseReminderList(it) }?.firstOrNull { it.key == key }
 
-        if (item != null) {
+        // P6 / DL-03: "Native reminders" OFF -> no notification (rearmOne below cancels the key).
+        if (item != null && ReminderPrefs.isEnabled(ctx)) {
             val now = System.currentTimeMillis()
             // The slot this alarm was meant for: same wall-clock minute, computed from now
             // rounded down would be fragile across DST; instead guard with a coarse window
@@ -46,12 +47,10 @@ class ReminderReceiver : BroadcastReceiver() {
             if (now - last > 60_000L) {
                 // The intended slot for this alarm: item's time on the date of the intended fire
                 // time, even if the alarm actually fired late (e.g. inexact window past midnight).
-                val today = ReminderDedupe.localDateString(
-                    slotBaseMs(intent.getLongExtra(ReminderScheduler.EXTRA_FIRE_AT, 0L), now),
-                    TimeZone.getDefault()
-                )
-                val slot = ReminderDedupe.buildSlotKey(
-                    item.title, today, ReminderDedupe.timeString(item.hour, item.minute)
+                // F3: same function the parity test (ReminderDedupeParityTest) checks.
+                val slot = ReminderDedupe.nativeSlotKey(
+                    item.title, item.hour, item.minute,
+                    intent.getLongExtra(ReminderScheduler.EXTRA_FIRE_AT, 0L), now, TimeZone.getDefault()
                 )
                 // The web app (via DelegationService) may have already shown this exact slot:
                 // skip our own copy but still mark the alarm's slot fired so it does not re-post

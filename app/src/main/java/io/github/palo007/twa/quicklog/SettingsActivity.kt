@@ -3,18 +3,22 @@ package io.github.palo007.twa.quicklog
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
+import android.content.ComponentName
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.text.format.DateUtils
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import androidx.core.app.ActivityCompat
 
@@ -31,6 +35,10 @@ class SettingsActivity : Activity() {
     private lateinit var allowExactAlarms: Button
     private lateinit var allowNotifications: Button
     private lateinit var retryRejected: Button
+    private lateinit var nativeSwitch: Switch
+    private lateinit var allowBattery: Button
+    private lateinit var autostart: Button
+    private var ownerDialog: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -98,14 +106,37 @@ class SettingsActivity : Activity() {
                 }
             }
         }
+        // P6 / DL-03: "Native reminders" switch. OFF cancels all alarms; sync still downloads.
+        nativeSwitch = Switch(this).apply {
+            text = "Native reminders (this app fires them)"
+            textSize = 16f
+            setOnCheckedChangeListener { _, on ->
+                if (on == ReminderPrefs.isEnabled(this@SettingsActivity)) return@setOnCheckedChangeListener
+                ReminderPrefs.setEnabled(this@SettingsActivity, on)
+                ReminderScheduler.rearm(this@SettingsActivity)
+                render()
+            }
+        }
+        // P6 / DL-12: one tap to "Allow unrestricted battery" (sideloaded, permission in manifest).
+        allowBattery = Button(this).apply {
+            text = "Allow unrestricted battery"
+            setOnClickListener { openBatteryDialog() }
+        }
+        autostart = Button(this).apply {
+            text = "Autostart (phone maker settings)"
+            setOnClickListener { openAutostart() }
+        }
         val lp = { LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = pad } }
         col.addView(status, lp())
         col.addView(retryRejected, lp())
         col.addView(connect, lp())
         col.addView(refresh, lp())
         col.addView(remindersStatus, lp())
+        col.addView(nativeSwitch, lp())
         col.addView(allowExactAlarms, lp())
         col.addView(allowNotifications, lp())
+        col.addView(allowBattery, lp())
+        col.addView(autostart, lp())
         col.addView(help, lp())
         setContentView(ScrollView(this).apply { addView(col) })
     }
@@ -125,6 +156,7 @@ class SettingsActivity : Activity() {
         // Covers returning from the "Allow exact alarms" / "Allow notifications" system screens.
         ReminderScheduler.rearm(this)
         render()
+        maybeAskOwner()
         if (login == DropboxAuth.LoginResult.STORE_FAILED) {
             // TWA-C5 / DL-10
             status.append(
@@ -177,12 +209,33 @@ class SettingsActivity : Activity() {
         val lastReminderRefresh = p.getLong(ReminderSyncWorker.KEY_LAST_REFRESH, 0)
         val reminderStatusMsg = p.getString(ReminderSyncWorker.KEY_STATUS, null)
         val exactAllowed = ReminderScheduler.hasExactAlarmPermission(this)
+        val now = System.currentTimeMillis()
+        val nativeOn = ReminderPrefs.isEnabled(this)
+        val ownerFound = ReminderPrefs.otherOwnerInstalled(this)
         val rsb = StringBuilder()
-        rsb.append("Reminders: ").append(armed).append(" scheduled")
+        rsb.append("Reminders: ").append(if (nativeOn) "$armed scheduled" else "off (native reminders switched off)")
+        rsb.append("\nQuesta app (fires reminders too): ").append(if (ownerFound) "installed" else "not found")
+        // DL-16: web sync time = /state.json server-modified; never `updatedAt`.
+        rsb.append("\nQuesta last synced (any device): ")
+            .append(syncAgeLine(p.getLong(ReminderSyncWorker.KEY_STATE_SYNCED, 0L), now))
+        rsb.append("\nReminder list downloaded: ")
+            .append(syncAgeLine(p.getLong(ReminderSyncWorker.KEY_REMINDERS_OK, 0L), now))
         rsb.append("\nLast checked: ").append(ago(lastReminderRefresh))
         rsb.append("\nExact alarms: ").append(if (exactAllowed) "yes" else "no")
         if (reminderStatusMsg != null) rsb.append("\n").append(reminderStatusMsg)
+        val ignoring = isIgnoringBattery()
+        if (Build.VERSION.SDK_INT >= 23) {
+            rsb.append("\nBattery: ").append(if (ignoring) "unrestricted" else "optimized (reminders may be late)")
+        }
+        val oem = autostartComponents(Build.MANUFACTURER)
+        if (oem.isNotEmpty()) {
+            rsb.append("\nOn this phone also allow Autostart for Questa (cannot be checked from here).")
+        }
         remindersStatus.text = rsb
+        nativeSwitch.isChecked = nativeOn
+        allowBattery.visibility =
+            if (showUnrestrictedBattery(Build.VERSION.SDK_INT, ignoring)) android.view.View.VISIBLE else android.view.View.GONE
+        autostart.visibility = if (oem.isNotEmpty()) android.view.View.VISIBLE else android.view.View.GONE
 
         allowExactAlarms.visibility =
             if (Build.VERSION.SDK_INT >= 31 && !exactAllowed) android.view.View.VISIBLE else android.view.View.GONE
@@ -196,6 +249,67 @@ class SettingsActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_NOTIFICATIONS) render()
+    }
+
+    override fun onPause() {
+        ownerDialog?.dismiss() // not answered: ask again next time (never decided silently)
+        ownerDialog = null
+        super.onPause()
+    }
+
+    /** DL-03: ask ONCE when the Questa (Kotlin) app is installed; never switch off silently. */
+    private fun maybeAskOwner() {
+        if (ownerDialog != null) return
+        val found = ReminderPrefs.otherOwnerInstalled(this)
+        if (!shouldAskOwner(found, ReminderPrefs.ownerAsked(this), ReminderPrefs.isEnabled(this))) return
+        val answer = { yes: Boolean ->
+            ReminderPrefs.markOwnerAsked(this)
+            ReminderPrefs.setEnabled(this, enabledAfterAnswer(yes))
+            ReminderScheduler.rearm(this)
+            ownerDialog = null
+            render()
+        }
+        ownerDialog = AlertDialog.Builder(this)
+            .setTitle("Two Questa apps")
+            .setMessage("Questa app is installed. Let it fire reminders and turn them off here?")
+            .setPositiveButton("Yes") { _, _ -> answer(true) }
+            .setNegativeButton("No") { _, _ -> answer(false) }
+            .setCancelable(false)
+            .show()
+    }
+
+    private fun isIgnoringBattery(): Boolean {
+        if (Build.VERSION.SDK_INT < 23) return true
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        return pm.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    private fun tryStart(intent: Intent): Boolean = try {
+        startActivity(intent)
+        true
+    } catch (e: ActivityNotFoundException) {
+        false
+    } catch (e: SecurityException) {
+        false
+    }
+
+    private fun appDetails(): Intent =
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+
+    private fun openBatteryDialog() {
+        if (Build.VERSION.SDK_INT < 23) return
+        val ok = tryStart(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))) ||
+            tryStart(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) ||
+            tryStart(appDetails())
+        if (!ok) remindersStatus.append("\nOpen Android Settings > Apps > Questa > Battery and choose Unrestricted.")
+    }
+
+    private fun openAutostart() {
+        for (c in autostartComponents(Build.MANUFACTURER)) {
+            if (tryStart(Intent().setComponent(ComponentName(c.pkg, c.cls)))) return
+        }
+        tryStart(appDetails())
+        remindersStatus.append("\nFind \"Autostart\" (or \"Background start\") for Questa and allow it.")
     }
 
     companion object {

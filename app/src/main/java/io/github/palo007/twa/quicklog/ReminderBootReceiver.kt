@@ -8,23 +8,32 @@ import android.util.Log
 
 /**
  * Exported, but only reacts to system-broadcast actions (plan todo 16): device boot, wall-clock
- * time changed, timezone changed, or this app package replaced (e.g. after an update wiped
- * in-flight alarms). Re-arms every reminder from the last-known-good JSON; does not need
- * network since ReminderScheduler.rearm reads from prefs.
+ * time changed, timezone changed, this app package replaced (e.g. after an update wiped
+ * in-flight alarms), or the exact-alarm permission was granted (TWA-A6). Re-arms every reminder
+ * from the last-known-good JSON; does not need network since ReminderScheduler.rearm reads from prefs.
  */
 class ReminderBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        when (intent.action) {
-            Intent.ACTION_BOOT_COMPLETED,
-            Intent.ACTION_TIME_CHANGED,
-            Intent.ACTION_TIMEZONE_CHANGED,
-            Intent.ACTION_MY_PACKAGE_REPLACED -> {
-                try {
-                    ReminderScheduler.rearm(context.applicationContext)
-                } catch (t: Throwable) {
-                    Log.w("QuestaQuickLog", "rearm on ${intent.action} failed", t)
-                }
-            }
+        if (!isRearmAction(intent.action)) return
+        try {
+            ReminderScheduler.rearm(context.applicationContext)
+        } catch (t: Throwable) {
+            Log.w("QuestaQuickLog", "rearm on ${intent.action} failed", t)
         }
     }
+}
+
+/** AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED (API 31), as a literal for minSdk 21. */
+internal const val ACTION_EXACT_ALARM_PERMISSION_CHANGED =
+    "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"
+
+/** Pure: which broadcast actions re-arm all reminders (JVM-tested). */
+internal fun isRearmAction(action: String?): Boolean = when (action) {
+    Intent.ACTION_BOOT_COMPLETED,
+    Intent.ACTION_TIME_CHANGED,
+    Intent.ACTION_TIMEZONE_CHANGED,
+    Intent.ACTION_MY_PACKAGE_REPLACED,
+    // TWA-A6 (API 31-32): exact-alarm permission granted -> re-arm so alarms become exact now.
+    ACTION_EXACT_ALARM_PERMISSION_CHANGED -> true
+    else -> false
 }
