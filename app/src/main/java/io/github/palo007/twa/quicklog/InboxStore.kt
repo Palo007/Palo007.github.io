@@ -67,8 +67,12 @@ class InboxStore(private val dir: File) {
         return true
     }
 
-    /** Taps kept on the phone that will not be uploaded (for Settings: "Could not upload: N"). */
-    fun rejectedCount(): Int = rejectedDir.listFiles { f -> f.isFile }?.size ?: 0
+    /**
+     * Taps kept on the phone that will not be uploaded (for Settings: "Could not upload: N"). DL-30: counts only
+     * files [requeueRejected] can move back; parked crash-left `.tmp` files stay on disk but are not counted.
+     */
+    fun rejectedCount(): Int =
+        rejectedDir.listFiles { f -> f.isFile && REJECTED_NAME.matches(f.name) }?.size ?: 0
 
     /**
      * Settings "Try again" (DL-25): moves rejected taps back into the queue and returns how many moved.

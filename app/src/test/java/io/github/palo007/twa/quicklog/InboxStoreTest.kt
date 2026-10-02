@@ -41,7 +41,8 @@ class InboxStoreTest {
         assertTrue("young tmp may be a write in progress", young.exists())
         assertFalse("stale counter tmp is not a tap and goes", oldCounterTmp.exists())
         assertEquals(1, store.count())
-        assertEquals(1, store.rejectedCount())
+        // DL-30: a parked tmp cannot be re-queued, so Settings does not count it.
+        assertEquals(0, store.rejectedCount())
     }
 
     /** Review minor: kills the mutation that drops the `.tmp` filter in sweepTmp. */
@@ -167,6 +168,21 @@ class InboxStoreTest {
         assertTrue(File(rej, "abcdefgh-0001.json.tmp").exists())
         assertTrue(File(rej, "abcdefgh-0002.json.tmp.1").exists())
         assertFalse(File(dir, "abcdefgh-0001.json.tmp").exists())
+        assertEquals("DL-30: .tmp leftovers are not counted", 0, store.rejectedCount())
+    }
+
+    /** DL-30: Settings "Could not upload: N" counts only what Try again can re-queue; .tmp stays on disk. */
+    @Test fun rejectedCountIgnoresTmpLeftovers() {
+        val dir = tmp.newFolder("inbox")
+        val store = InboxStore(dir)
+        val rej = File(dir, "rejected")
+        fileAt(rej, "abcdefgh-0001.json", "a", 0)
+        fileAt(rej, "abcdefgh-0002.json.1", "b", 0)
+        val leftover = fileAt(rej, "abcdefgh-0003.json.tmp", "half", 0)
+
         assertEquals(2, store.rejectedCount())
+        assertEquals(2, store.requeueRejected())
+        assertEquals(0, store.rejectedCount())
+        assertTrue("never deleted", leftover.exists())
     }
 }
