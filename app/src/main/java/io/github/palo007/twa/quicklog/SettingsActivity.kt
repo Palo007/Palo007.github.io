@@ -3,6 +3,7 @@ package io.github.palo007.twa.quicklog
 
 import android.Manifest
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -29,6 +30,7 @@ class SettingsActivity : Activity() {
     private lateinit var remindersStatus: TextView
     private lateinit var allowExactAlarms: Button
     private lateinit var allowNotifications: Button
+    private lateinit var retryRejected: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,10 +61,31 @@ class SettingsActivity : Activity() {
             text = "Allow exact alarms"
             setOnClickListener {
                 if (Build.VERSION.SDK_INT >= 31) {
-                    startActivity(
-                        Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName"))
-                    )
+                    // TWA-A8: some API 31-32 builds have no screen for this action.
+                    try {
+                        startActivity(
+                            Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName"))
+                        )
+                    } catch (e: ActivityNotFoundException) {
+                        try {
+                            startActivity(
+                                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+                            )
+                        } catch (e2: ActivityNotFoundException) { }
+                        remindersStatus.append(
+                            "\nOpen Android Settings > Apps > Questa > Alarms & reminders and allow it."
+                        )
+                    }
                 }
+            }
+        }
+        retryRejected = Button(this).apply {
+            text = "Try again"
+            setOnClickListener {
+                // DL-25: rejected taps back into the queue, then upload.
+                InboxStore(this@SettingsActivity).requeueRejected()
+                InboxUploadWorker.enqueue(this@SettingsActivity)
+                render()
             }
         }
         allowNotifications = Button(this).apply {
@@ -77,6 +100,7 @@ class SettingsActivity : Activity() {
         }
         val lp = { LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = pad } }
         col.addView(status, lp())
+        col.addView(retryRejected, lp())
         col.addView(connect, lp())
         col.addView(refresh, lp())
         col.addView(remindersStatus, lp())
@@ -88,7 +112,8 @@ class SettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (DropboxAuth.captureLoginResult(this)) {
+        val login = DropboxAuth.captureLoginResult(this)
+        if (login == DropboxAuth.LoginResult.CONNECTED) {
             // Fresh login: flush the queue, fetch habits, and swap "Connect" for habit items.
             InboxUploadWorker.enqueue(this)
             ShortcutRefreshWorker.enqueueNow(this)
@@ -100,13 +125,22 @@ class SettingsActivity : Activity() {
         // Covers returning from the "Allow exact alarms" / "Allow notifications" system screens.
         ReminderScheduler.rearm(this)
         render()
+        if (login == DropboxAuth.LoginResult.STORE_FAILED) {
+            // TWA-C5 / DL-10
+            status.append(
+                "\n\nCould not save the Dropbox login on this phone (secure storage error). Taps stay queued. " +
+                    "Try Connect again; if it keeps failing, restart the phone."
+            )
+        }
     }
 
     private fun render() {
         val p = DropboxAuth.prefs(this)
         val connected = DropboxAuth.isConnected(this)
         val broken = DropboxAuth.isAuthBroken(this)
-        val queued = InboxStore(this).count()
+        val store = InboxStore(this)
+        val queued = store.count()
+        val rejected = store.rejectedCount()
         val lastUp = p.getLong(InboxUploadWorker.KEY_LAST_UPLOAD, 0)
         val lastRefresh = p.getLong(ShortcutRefreshWorker.KEY_LAST_REFRESH, 0)
         val habitStatus = p.getString(ShortcutRefreshWorker.KEY_STATUS, null)
@@ -119,6 +153,8 @@ class SettingsActivity : Activity() {
             }
         )
         sb.append("\nWaiting to upload: ").append(queued)
+        if (rejected > 0) sb.append("\nCould not upload: ").append(rejected).append(" (kept on the phone)")
+        retryRejected.visibility = if (rejected > 0) android.view.View.VISIBLE else android.view.View.GONE
         sb.append("\nLast upload: ").append(ago(lastUp))
         sb.append("\nHabit list checked: ").append(ago(lastRefresh))
         if (habitStatus != null) sb.append("\n").append(habitStatus)

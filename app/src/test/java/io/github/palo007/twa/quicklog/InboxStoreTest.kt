@@ -41,7 +41,8 @@ class InboxStoreTest {
         assertTrue("young tmp may be a write in progress", young.exists())
         assertFalse("stale counter tmp is not a tap and goes", oldCounterTmp.exists())
         assertEquals(1, store.count())
-        assertEquals(1, store.rejectedCount())
+        // DL-30: a parked tmp cannot be re-queued, so Settings does not count it.
+        assertEquals(0, store.rejectedCount())
     }
 
     /** Review minor: kills the mutation that drops the `.tmp` filter in sweepTmp. */
@@ -105,5 +106,83 @@ class InboxStoreTest {
         store.reject(b)
         assertFalse(File(dir, ".fail/abcdefgh-0002.json").exists())
         assertEquals(0, store.count())
+    }
+
+    /** DL-25 "Try again": a rejected tap goes back into the queue with a fresh retry budget. */
+    @Test fun requeueMovesRejectedBackAndResetsCounter() {
+        val dir = tmp.newFolder("inbox")
+        val store = InboxStore(dir)
+        store.write(rec("abcdefgh-0001"))
+        val f = File(dir, "abcdefgh-0001.json")
+        val bytes = f.readBytes()
+        store.recordFailure(f)
+        assertTrue(store.reject(f))
+        // A counter left behind (e.g. written after the reject) must not shorten the new retry budget.
+        fileAt(File(dir, ".fail"), "abcdefgh-0001.json", "29", 0)
+
+        assertEquals(1, store.requeueRejected())
+
+        assertEquals(listOf("abcdefgh-0001.json"), store.list().map { it.name })
+        assertTrue(bytes.contentEquals(File(dir, "abcdefgh-0001.json").readBytes()))
+        assertEquals(0, store.rejectedCount())
+        assertEquals("counter restarts", 1, store.recordFailure(File(dir, "abcdefgh-0001.json")))
+    }
+
+    @Test fun requeueStripsClashSuffixAndNeverOverwrites() {
+        val dir = tmp.newFolder("inbox")
+        val store = InboxStore(dir)
+        val rej = File(dir, "rejected")
+        fileAt(rej, "abcdefgh-0001.json", "first", 0)
+        fileAt(rej, "abcdefgh-0001.json.1", "second", 0)
+        fileAt(rej, "abcdefgh-0002.json.1", "only-suffixed", 0)
+        fileAt(dir, "abcdefgh-0003.json", "in-queue", 0)
+        fileAt(rej, "abcdefgh-0003.json", "rejected-copy", 0)
+
+        assertEquals(2, store.requeueRejected())
+
+        assertEquals("first", File(dir, "abcdefgh-0001.json").readText(Charsets.UTF_8))
+        assertEquals("only-suffixed", File(dir, "abcdefgh-0002.json").readText(Charsets.UTF_8))
+        assertEquals("queue file never overwritten", "in-queue", File(dir, "abcdefgh-0003.json").readText(Charsets.UTF_8))
+        assertEquals("second", File(rej, "abcdefgh-0001.json.1").readText(Charsets.UTF_8))
+        assertEquals("rejected-copy", File(rej, "abcdefgh-0003.json").readText(Charsets.UTF_8))
+        assertEquals(2, store.rejectedCount())
+
+        // Once the queued copy is gone, the next Try again moves the clashing one.
+        store.delete(File(dir, "abcdefgh-0001.json"))
+        assertEquals(1, store.requeueRejected())
+        assertEquals("second", File(dir, "abcdefgh-0001.json").readText(Charsets.UTF_8))
+    }
+
+    /** A crash-left .tmp may be half-written: it stays parked, never uploaded. */
+    @Test fun requeueSkipsTmpLeftovers() {
+        val dir = tmp.newFolder("inbox")
+        val store = InboxStore(dir)
+        val rej = File(dir, "rejected")
+        fileAt(rej, "abcdefgh-0001.json.tmp", "half", 0)
+        fileAt(rej, "abcdefgh-0002.json.tmp.1", "half2", 0)
+        fileAt(rej, "abcdefgh-0003.json", "good", 0)
+
+        assertEquals(1, store.requeueRejected())
+
+        assertEquals(listOf("abcdefgh-0003.json"), store.list().map { it.name })
+        assertTrue(File(rej, "abcdefgh-0001.json.tmp").exists())
+        assertTrue(File(rej, "abcdefgh-0002.json.tmp.1").exists())
+        assertFalse(File(dir, "abcdefgh-0001.json.tmp").exists())
+        assertEquals("DL-30: .tmp leftovers are not counted", 0, store.rejectedCount())
+    }
+
+    /** DL-30: Settings "Could not upload: N" counts only what Try again can re-queue; .tmp stays on disk. */
+    @Test fun rejectedCountIgnoresTmpLeftovers() {
+        val dir = tmp.newFolder("inbox")
+        val store = InboxStore(dir)
+        val rej = File(dir, "rejected")
+        fileAt(rej, "abcdefgh-0001.json", "a", 0)
+        fileAt(rej, "abcdefgh-0002.json.1", "b", 0)
+        val leftover = fileAt(rej, "abcdefgh-0003.json.tmp", "half", 0)
+
+        assertEquals(2, store.rejectedCount())
+        assertEquals(2, store.requeueRejected())
+        assertEquals(0, store.rejectedCount())
+        assertTrue("never deleted", leftover.exists())
     }
 }

@@ -67,8 +67,33 @@ class InboxStore(private val dir: File) {
         return true
     }
 
-    /** Taps kept on the phone that will not be uploaded (for Settings: "Could not upload: N"). */
-    fun rejectedCount(): Int = rejectedDir.listFiles { f -> f.isFile }?.size ?: 0
+    /**
+     * Taps kept on the phone that will not be uploaded (for Settings: "Could not upload: N"). DL-30: counts only
+     * files [requeueRejected] can move back; parked crash-left `.tmp` files stay on disk but are not counted.
+     */
+    fun rejectedCount(): Int =
+        rejectedDir.listFiles { f -> f.isFile && REJECTED_NAME.matches(f.name) }?.size ?: 0
+
+    /**
+     * Settings "Try again" (DL-25): moves rejected taps back into the queue and returns how many moved.
+     * `<id>.json` and `<id>.json.<n>` (clash suffix from [reject]) go back as `<id>.json` with a fresh failure
+     * counter. Never overwrites a queued file (that one stays in rejected/ for a later try). Crash-left `.tmp`
+     * files may be half-written and stay parked. A failed rename leaves the file where it is; nothing is deleted.
+     */
+    fun requeueRejected(): Int {
+        val files = rejectedDir.listFiles { f -> f.isFile } ?: return 0
+        var moved = 0
+        for (f in files.sortedBy { it.name }) {
+            val target = REJECTED_NAME.matchEntire(f.name)?.groupValues?.get(1) ?: continue
+            val dest = File(dir, target)
+            if (dest.exists()) continue
+            if (f.renameTo(dest)) {
+                File(failDir, target).delete()
+                moved++
+            }
+        }
+        return moved
+    }
 
     /**
      * Counts one non-network upload failure for [f] in inbox/.fail/<name> and returns the new total.
@@ -94,5 +119,7 @@ class InboxStore(private val dir: File) {
 
     companion object {
         const val TMP_MAX_AGE_MS = 60L * 60L * 1000L
+        /** `<base>.json` optionally followed by a `.<digits>` clash suffix; `.tmp` names never match. */
+        private val REJECTED_NAME = Regex("""(.+\.json)(?:\.\d+)?""")
     }
 }
