@@ -74,6 +74,49 @@ object ReminderDedupe {
         return if (now == minusOne) listOf(now) else listOf(now, minusOne)
     }
 
+    // HAND-OWNED (quick-log) P7 / TWA-12: pure compositions of the slot key on each side, so a JVM
+    // test can prove web and native agree. Key format unchanged (DL-17).
+
+    /**
+     * Pure: the slot key the native alarm uses, exactly as `ReminderReceiver` composes it: item
+     * time on the local date of the intended fire time ([slotBaseMs], A4), now if no extra.
+     */
+    @JvmStatic
+    fun nativeSlotKey(
+        title: String, hour: Int, minute: Int, intendedFireAt: Long, nowMs: Long, tz: TimeZone
+    ): String = buildSlotKey(
+        title, localDateString(slotBaseMs(intendedFireAt, nowMs), tz), timeString(hour, minute)
+    )
+
+    /** Pure: the candidate slot keys for a delegated web notification: today x [candidateTimes]. */
+    @JvmStatic
+    fun webSlotKeys(title: String, body: String?, nowMs: Long, tz: TimeZone): List<String> {
+        val today = localDateString(nowMs, tz)
+        return candidateTimes(body, nowMs, tz).map { buildSlotKey(title, today, it) }
+    }
+
+    /** Outcome of the web-side dedupe decision (`DelegationService`). */
+    sealed class WebDecision {
+        /** Title not in the stored reminder list: never recorded or dropped. */
+        object Untracked : WebDecision()
+        /** Native already showed [slot]: drop the web copy. */
+        data class Drop(val slot: String) : WebDecision()
+        /** Post the web copy and mark every one of [slots] as shown by web. */
+        data class Pass(val slots: List<String>) : WebDecision()
+    }
+
+    /** Pure: the web-side decision. [nativeShown] is the only side-effect-free lookup it needs. */
+    @JvmStatic
+    fun webDecision(
+        title: String, body: String?, nowMs: Long, tz: TimeZone,
+        knownTitles: Collection<String>, nativeShown: (String) -> Boolean
+    ): WebDecision {
+        if (title !in knownTitles) return WebDecision.Untracked
+        val slots = webSlotKeys(title, body, nowMs, tz)
+        for (slot in slots) if (nativeShown(slot)) return WebDecision.Drop(slot)
+        return WebDecision.Pass(slots)
+    }
+
     @JvmStatic
     @JvmOverloads
     fun markNative(ctx: Context, slot: String, nowMs: Long = System.currentTimeMillis()) {
