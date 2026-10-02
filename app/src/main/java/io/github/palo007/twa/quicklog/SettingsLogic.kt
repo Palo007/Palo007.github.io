@@ -44,6 +44,12 @@ internal fun autostartComponents(manufacturer: String?): List<OemComponent> =
         else -> emptyList()
     }
 
+/** P9 / P1d-m2 (TWA-A8): keep the "open Android Settings" hint across render() until exact alarms are allowed. */
+internal fun showExactAlarmHint(requested: Boolean, exactAllowed: Boolean): Boolean = requested && !exactAllowed
+
+/** P9 / P1d-m3: Toast after "Try again"; null when something moved (the status line shows it). */
+internal fun retryToast(moved: Int): String? = if (moved <= 0) "Nothing to retry" else null
+
 private const val STALE_DAYS = 7
 
 /** DL-16: "never", "just now", "N min ago", "N h ago", "N days ago"; older than 7 days adds a hint. */

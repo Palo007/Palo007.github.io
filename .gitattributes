@@ -1,0 +1,2 @@
+# DL-23: the Gradle build rewrites this file with LF; check it out with LF so builds leave git status clean.
+app/src/main/res/xml/shortcuts.xml text eol=lf
