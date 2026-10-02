@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HAND-OWNED (quick-log, P5 / DL-15). Auto Backup rules for API 23-30 (android:fullBackupContent).
+     Excludes only the Dropbox credential prefs; everything else, incl. the upload queue
+     (files/inbox/*.json), is backed up. No <include>: that would switch to include-only mode. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="questa_quicklog.xml" />
+</full-backup-content>
