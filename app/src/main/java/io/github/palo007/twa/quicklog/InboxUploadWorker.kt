@@ -10,12 +10,16 @@ import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import androidx.work.Worker
 import androidx.work.WorkerParameters
+import com.dropbox.core.AccessErrorException
+import com.dropbox.core.BadResponseCodeException
 import com.dropbox.core.DbxException
 import com.dropbox.core.InvalidAccessTokenException
 import com.dropbox.core.NetworkIOException
 import com.dropbox.core.RetryException
 import com.dropbox.core.ServerException
+import com.dropbox.core.oauth.DbxOAuthException
 import com.dropbox.core.v2.files.UploadErrorException
+import com.dropbox.core.v2.files.WriteConflictError
 import com.dropbox.core.v2.files.WriteMode
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -107,7 +111,13 @@ class InboxUploadWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, pa
  * REJECT keeps the tap on the phone (inbox/rejected/); nothing here deletes an unconfirmed tap.
  */
 internal object UploadPolicy {
-    enum class Kind { CONFLICT, TERMINAL, OTHER_UPLOAD, DBX_OTHER, NETWORK }
+    /**
+     * CONFLICT: a same-name FILE is already there (this tap was uploaded before). TERMINAL: Dropbox refuses
+     * this name. OTHER_UPLOAD / DBX_OTHER: a per-file or unknown error, counted. NETWORK: no connection.
+     * WAIT: the Dropbox side cannot take any tap right now (outage, full account, throttling, auth,
+     * access) - not this file's fault, never counted (DL-24, DL-29).
+     */
+    enum class Kind { CONFLICT, TERMINAL, OTHER_UPLOAD, DBX_OTHER, NETWORK, WAIT }
     enum class Action { DELETE, RETRY, REJECT }
 
     /** ~4-5 days with WorkManager's exponential back-off (30 s base, 5 h cap). Design Q3. */
@@ -116,20 +126,25 @@ internal object UploadPolicy {
     fun decide(kind: Kind, attempts: Int): Action = when (kind) {
         Kind.CONFLICT -> Action.DELETE
         Kind.TERMINAL -> Action.REJECT
-        Kind.NETWORK -> Action.RETRY
+        Kind.NETWORK, Kind.WAIT -> Action.RETRY
         Kind.OTHER_UPLOAD, Kind.DBX_OTHER -> if (attempts >= MAX_ATTEMPTS) Action.REJECT else Action.RETRY
     }
 
-    /** Whether a failure of this kind is recorded against the file. */
+    /** Whether a failure of this kind is recorded against the file. DL-29: only per-file errors count. */
     fun counts(kind: Kind): Boolean = kind == Kind.OTHER_UPLOAD || kind == Kind.DBX_OTHER
 
     /**
-     * Any other SDK error (UploadErrorException and InvalidAccessTokenException are caught before).
-     * DL-24: rate limit (429, RateLimitException is a RetryException) and server errors (5xx) are a
-     * Dropbox outage, not the file's fault: treated like the network, never counted.
+     * Any other SDK error (UploadErrorException and InvalidAccessTokenException are caught before in the
+     * worker; the token one is still mapped here so the policy alone is safe).
+     * DL-24/DL-29: rate limit (429, RateLimitException is a RetryException), server errors (ServerException,
+     * any BadResponseCodeException >= 500), token refresh failure (DbxOAuthException), revoked or expired
+     * token (InvalidAccessTokenException) and 403 (AccessErrorException) never count.
      */
-    fun kindOfDbx(e: DbxException): Kind = when (e) {
-        is NetworkIOException, is RetryException, is ServerException -> Kind.NETWORK
+    fun kindOfDbx(e: DbxException): Kind = when {
+        e is NetworkIOException -> Kind.NETWORK
+        e is RetryException || e is ServerException -> Kind.WAIT
+        e is BadResponseCodeException && e.statusCode >= 500 -> Kind.WAIT
+        e is DbxOAuthException || e is InvalidAccessTokenException || e is AccessErrorException -> Kind.WAIT
         else -> Kind.DBX_OTHER
     }
 
@@ -138,8 +153,13 @@ internal object UploadPolicy {
         if (!err.isPath) return Kind.OTHER_UPLOAD
         val reason = err.pathValue.reason
         return when {
-            reason.isConflict -> Kind.CONFLICT
+            // MA-1: only FILE proves the tap is already on Dropbox. FOLDER / FILE_ANCESTOR / OTHER never delete.
+            reason.isConflict && reason.conflictValue == WriteConflictError.FILE -> Kind.CONFLICT
+            reason.isConflict -> Kind.OTHER_UPLOAD
             reason.isDisallowedName || reason.isMalformedPath -> Kind.TERMINAL
+            // Not about this file (DL-29): the user's Dropbox is full, throttled, or /inbox is not writable.
+            reason.isInsufficientSpace || reason.isTooManyWriteOperations || reason.isNoWritePermission ||
+                reason.isTeamFolder || reason.isOperationSuppressed -> Kind.WAIT
             else -> Kind.OTHER_UPLOAD
         }
     }

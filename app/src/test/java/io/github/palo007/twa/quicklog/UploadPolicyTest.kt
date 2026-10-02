@@ -75,11 +75,53 @@ class UploadPolicyTest {
         assertEquals(Action.REJECT, UploadPolicy.decide(UploadPolicy.kindOf(ex(WriteError.DISALLOWED_NAME)), 1))
     }
 
+    // MA-1: only a same-name FILE conflict proves this tap is already on Dropbox.
+    @Test fun onlyFileConflictDeletes() {
+        assertEquals(Action.DELETE, UploadPolicy.decide(UploadPolicy.kindOf(ex(WriteError.conflict(WriteConflictError.FILE))), 0))
+        for (c in listOf(WriteConflictError.FOLDER, WriteConflictError.FILE_ANCESTOR, WriteConflictError.OTHER)) {
+            val k = UploadPolicy.kindOf(ex(WriteError.conflict(c)))
+            for (n in listOf(0, 1, UploadPolicy.MAX_ATTEMPTS - 1, UploadPolicy.MAX_ATTEMPTS, 1000)) {
+                assertTrue("$c must never delete (attempts $n)", UploadPolicy.decide(k, n) != Action.DELETE)
+            }
+            assertTrue("$c counts as a permanent error", UploadPolicy.counts(k))
+            assertEquals(Action.REJECT, UploadPolicy.decide(k, UploadPolicy.MAX_ATTEMPTS))
+        }
+    }
+
+    // MA-2 / DL-29: only an error that says THIS file can never be accepted may count.
+    @Test fun outageAndAccountErrorsNeverCount() {
+        val errs = listOf(
+            com.dropbox.core.BadResponseCodeException("req", "500", 500),
+            com.dropbox.core.BadResponseCodeException("req", "503", 503),
+            com.dropbox.core.oauth.DbxOAuthException("req",
+                com.dropbox.core.oauth.DbxOAuthError(com.dropbox.core.oauth.DbxOAuthError.INVALID_GRANT, "refresh failed")),
+            com.dropbox.core.InvalidAccessTokenException("req", "401", com.dropbox.core.v2.auth.AuthError.EXPIRED_ACCESS_TOKEN),
+            com.dropbox.core.AccessErrorException("req", "403", com.dropbox.core.v2.auth.AccessError.OTHER),
+        )
+        for (e in errs) {
+            val k = UploadPolicy.kindOfDbx(e)
+            assertFalse("${e.javaClass.simpleName} ${e.message} must not count", UploadPolicy.counts(k))
+            assertEquals(Action.RETRY, afterMax(e))
+        }
+    }
+
+    @Test fun fullDropboxAndWriteThrottleNeverCount() {
+        for (w in listOf(WriteError.INSUFFICIENT_SPACE, WriteError.TOO_MANY_WRITE_OPERATIONS)) {
+            val k = UploadPolicy.kindOf(ex(w))
+            assertFalse("$w must not count: taps upload after the user frees space", UploadPolicy.counts(k))
+            assertEquals(Action.RETRY, UploadPolicy.decide(k, UploadPolicy.MAX_ATTEMPTS * 10))
+        }
+    }
+
+    @Test fun badResponse4xxStillCounts() {
+        assertTrue(UploadPolicy.counts(UploadPolicy.kindOfDbx(com.dropbox.core.BadResponseCodeException("req", "400", 400))))
+    }
+
     @Test fun kindOfMapsSdkErrors() {
         assertEquals(Kind.CONFLICT, UploadPolicy.kindOf(ex(WriteError.conflict(WriteConflictError.FILE))))
         assertEquals(Kind.TERMINAL, UploadPolicy.kindOf(ex(WriteError.DISALLOWED_NAME)))
         assertEquals(Kind.TERMINAL, UploadPolicy.kindOf(ex(WriteError.malformedPath("x"))))
-        assertEquals(Kind.OTHER_UPLOAD, UploadPolicy.kindOf(ex(WriteError.INSUFFICIENT_SPACE)))
+        assertEquals(Kind.OTHER_UPLOAD, UploadPolicy.kindOf(ex(WriteError.conflict(WriteConflictError.FOLDER))))
         assertEquals(Kind.OTHER_UPLOAD,
             UploadPolicy.kindOf(UploadErrorException("2/files/upload", "req", null, UploadError.PAYLOAD_TOO_LARGE)))
     }

@@ -78,8 +78,9 @@ class InboxStore(private val dir: File) {
     fun recordFailure(f: File): Int {
         val fd = failDir
         val counter = File(fd, f.name)
-        val next = (counter.takeIf { it.isFile }?.readText(Charsets.UTF_8)?.trim()?.toIntOrNull() ?: 0) + 1
+        var next = 1
         try {
+            next = (counter.takeIf { it.isFile }?.readText(Charsets.UTF_8)?.trim()?.toIntOrNull() ?: 0) + 1
             if (!fd.isDirectory && !fd.mkdirs()) return next
             val tmp = File(fd, f.name + ".tmp")
             tmp.writeText(next.toString(), Charsets.UTF_8)

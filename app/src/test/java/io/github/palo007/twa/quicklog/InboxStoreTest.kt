@@ -44,6 +44,19 @@ class InboxStoreTest {
         assertEquals(1, store.rejectedCount())
     }
 
+    /** Review minor: kills the mutation that drops the `.tmp` filter in sweepTmp. */
+    @Test fun sweepKeepsOldQueuedJson() {
+        val dir = tmp.newFolder("inbox")
+        val store = InboxStore(dir)
+        val queued = fileAt(dir, "abcdefgh-0009.json", "queued-tap", 48 * hour)
+
+        store.sweepTmp(now)
+
+        assertTrue("an old queued tap must stay in the queue", queued.exists())
+        assertEquals(listOf("abcdefgh-0009.json"), store.list().map { it.name })
+        assertEquals(0, store.rejectedCount())
+    }
+
     @Test fun rejectMovesOutOfQueue() {
         val dir = tmp.newFolder("inbox")
         val store = InboxStore(dir)
