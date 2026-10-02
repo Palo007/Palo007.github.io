@@ -1,9 +1,9 @@
 {
   "marker": "HAND-OWNED (quick-log",
   "definition": "lines containing marker in git ls-files, excluding *.md and tools/**, working tree",
-  "commit": "48e88ef",
-  "totalLines": 71,
-  "totalFiles": 47,
+  "commit": "4d46528",
+  "totalLines": 72,
+  "totalFiles": 48,
   "files": {
     "app/build.gradle": 5,
     "app/proguard-rules.pro": 2,
@@ -48,6 +48,7 @@
     "app/src/test/java/io/github/palo007/twa/quicklog/ReminderListTest.kt": 1,
     "app/src/test/java/io/github/palo007/twa/quicklog/ReminderRearmPlanTest.kt": 1,
     "app/src/test/java/io/github/palo007/twa/quicklog/ReminderSlotTest.kt": 1,
+    "app/src/test/java/io/github/palo007/twa/quicklog/ReminderSyncOutcomeTest.kt": 1,
     "app/src/test/java/io/github/palo007/twa/quicklog/SettingsLogicTest.kt": 1,
     "app/src/test/java/io/github/palo007/twa/quicklog/ShortcutPlanTest.kt": 1,
     "app/src/test/java/io/github/palo007/twa/quicklog/UploadPolicyTest.kt": 1,
