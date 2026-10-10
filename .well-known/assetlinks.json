@@ -11,5 +11,17 @@
       ],
       "check": "cb2"
     }
+  },
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "io.github.palo007.brainarcade",
+      "sha256_cert_fingerprints": [
+        "7E:9E:46:DF:CE:A2:C5:8C:BE:15:3D:64:49:DF:32:28:9D:43:1A:46:70:FF:05:05:B6:2D:2C:CE:4A:26:6B:68"
+      ]
+    }
   }
 ]
