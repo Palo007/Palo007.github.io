@@ -56,4 +56,18 @@ class ShortcutPlanTest {
             assertEquals(false, p.connect)
         }
     }
+
+    @Test fun linked_publishesUpToFourHabitItems() {
+        val text = """{"v":1,"habits":[{"id":"a","title":"A","quickLog":true},{"id":"b","title":"B","quickLog":true},{"id":"c","title":"C","quickLog":true},{"id":"d","title":"D","quickLog":true},{"id":"e","title":"E","quickLog":true}]}"""
+        val p = plan(connected = true, broken = false, text = text)
+        assertEquals(setOf("ql-h-a", "ql-h-b", "ql-h-c", "ql-h-d"), p.add)
+        assertEquals(4, p.items.size)
+    }
+
+    @Test fun broken_publishesReconnectPlusThreeHabitItems() {
+        val text = """{"v":1,"habits":[{"id":"a","title":"A","quickLog":true},{"id":"b","title":"B","quickLog":true},{"id":"c","title":"C","quickLog":true},{"id":"d","title":"D","quickLog":true}]}"""
+        val p = plan(connected = true, broken = true, text = text)
+        assertEquals(setOf("ql-connect", "ql-h-a", "ql-h-b", "ql-h-c"), p.add)
+        assertEquals(3, p.items.size)
+    }
 }

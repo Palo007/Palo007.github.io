@@ -9,16 +9,16 @@ import androidx.core.graphics.drawable.IconCompat
 import io.github.palo007.twa.R
 
 /**
- * Owns only the dynamic shortcuts whose id starts with "ql-". Others (the TWA's
- * "Site settings" item) are never touched. The launcher shows about 4-5 items in
- * total: "Site settings" + up to [MAX_ITEMS] habit items (no static items since 2026-09-24).
+ * Owns only the dynamic shortcuts whose id starts with "ql-". Others are never touched.
+ * The launcher shows the connect item plus up to [MAX_ITEMS] - 1 habit items while the
+ * login is broken, and up to [MAX_ITEMS] habit items when linked (no static items since 2026-09-24).
  */
 object ShortcutPublisher {
     const val KEY_HABITS_JSON = "habits_json"
     private const val KEY_SIGNATURE = "shortcut_sig"
     private const val PREFIX = "ql-"
     private const val CONNECT_ID = "ql-connect"
-    const val MAX_ITEMS = 3
+    const val MAX_ITEMS = 4
 
     /** What habits_json holds: nothing, something we cannot parse, or a valid list (may be empty). */
     internal sealed class Stored {
